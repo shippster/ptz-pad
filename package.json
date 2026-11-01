@@ -14,7 +14,9 @@
     "bridge": "node ptz-bridge.js",
     "helper": "node helper/ptz-pad-mcp.js",
     "postinstall": "node tools/get-models.js",
-    "web": "node tools/build-web.js"
+    "web": "node tools/build-web.js",
+    "bump": "node tools/bump.js",
+    "notes": "node tools/release-notes.js"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -75,11 +77,16 @@
     ]
   },
   "dependencies": {
-    "koffi": "^2.9.0",
-    "@mediapipe/tasks-vision": "^0.10.14"
+    "@mediapipe/tasks-vision": "^0.10.14",
+    "koffi": "^2.9.0"
   },
   "optionalDependencies": {
     "ffmpeg-static": "^5.2.0"
   },
-  "ptzpadInstall": "1.4.0"
+  "ptzpadInstall": "1.4.0",
+  "homepage": "https://micahshippee.github.io/ptz-pad/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/micahshippee/ptz-pad.git"
+  }
 }

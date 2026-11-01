@@ -21,4 +21,15 @@ const sw = path.join(out, 'sw.js');
 fs.writeFileSync(sw, fs.readFileSync(sw, 'utf8').replace(/const CACHE = '[^']*'/, `const CACHE = 'ptz-pad-${version}'`));
 fs.writeFileSync(path.join(out, '.nojekyll'), '');
 
+// The update feed every copy of PTZ Pad checks: the latest version plus recent notes,
+// so someone several versions behind sees everything they missed.
+const { allNotes } = require('./release-notes');
+const pkg = require(path.join(root, 'package.json'));
+const repo = (pkg.repository && (pkg.repository.url || pkg.repository) || '').replace(/^.*github\.com[/:]|\.git$/g, '');
+fs.writeFileSync(path.join(out, 'version.json'), JSON.stringify({
+  version,
+  download: repo ? `https://github.com/${repo}/releases/latest` : '',
+  releases: allNotes().slice(0, 10),
+}, null, 2));
+
 console.log(`Built PTZ Pad ${version} web version in _site/`);

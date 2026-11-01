@@ -79,6 +79,23 @@ p{margin:0}
 .chip.err i{background:var(--tally)}
 .chip button{background:none;border:0;padding:0;color:var(--amber);cursor:pointer;font-size:13.5px}
 
+/* update notice */
+.chip.upd i{background:var(--amber)}
+.chip.upd button{font-size:13.5px}
+.update{background:var(--panel);border:1px solid var(--line-soft);border-left:4px solid var(--amber);border-radius:10px;padding:12px 14px;margin:0 0 14px}
+.update-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.update-title{flex:1;min-width:220px;display:flex;flex-direction:column;gap:2px}
+.update-title b{font:600 19px/1.15 var(--cond)}
+.update-title span{font-size:13px;color:var(--muted)}
+.update-acts{display:flex;gap:8px;flex-wrap:wrap}
+.update-notes{margin-top:10px;max-height:240px;overflow:auto;font-size:14px}
+.update-notes h3{font:600 15px/1.2 var(--cond);margin:10px 0 4px;color:var(--muted)}
+.update-notes h3:first-child{margin-top:0}
+.update-notes ul{margin:0;padding-left:20px}
+.update-notes li{margin:3px 0}
+.update-notes code{font:13px var(--mono);background:var(--field);padding:0 4px;border-radius:4px}
+.update-notes a{color:var(--amber)}
+
 /* camera strip */
 .cams{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px}
 .cam{flex:none;display:flex;align-items:stretch;min-width:132px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;padding:0;text-align:left;overflow:hidden}
@@ -381,8 +398,20 @@ h2{font-size:16px;margin:0}
     <span class="chip c2" id="pad2Chip" hidden><i></i><span id="pad2Text">Controller 2</span></span>
     <span class="chip" id="tcChip" hidden><i></i><span id="tcText">TriCaster</span></span>
     <span class="chip" id="bridgeChip"><i></i><span id="bridgeText">Bridge not checked</span> <button id="bridgeRetry" type="button">Check</button> <button id="getHelper" type="button" hidden>Get the helper</button></span>
+    <span class="chip upd" id="updChip" hidden><i></i><button id="updChipBtn" type="button">Update available</button></span>
   </div>
 </header>
+
+<section class="update" id="updateBar" hidden aria-live="polite">
+  <div class="update-head">
+    <div class="update-title"><b id="updTitle"></b><span id="updSub"></span></div>
+    <div class="update-acts">
+      <button class="btn primary" type="button" id="updGo"></button>
+      <button class="btn" type="button" id="updLater">Later</button>
+    </div>
+  </div>
+  <div class="update-notes" id="updNotes"></div>
+</section>
 
 <fieldset class="modes" id="modes">
   <legend>How the controllers are used</legend>
@@ -768,12 +797,8 @@ const WEB_APP = !VIA_HELPER && /^https?:$/.test(location.protocol);
 // Served over HTTPS (GitHub Pages): the browser blocks plain-HTTP calls to cameras,
 // so every command goes through the bridge on this computer (http://localhost is allowed).
 const SECURE_WEB = WEB_APP && location.protocol === 'https:';
-// Where to download the desktop app, when the page knows its own GitHub repo.
-const RELEASES_URL = (() => {
-  const m = /^([a-z0-9-]+)\.github\.io$/i.exec(location.hostname);
-  const repo = location.pathname.split('/').filter(Boolean)[0];
-  return m && repo ? `https://github.com/${m[1]}/${repo}/releases/latest` : '';
-})();
+// Where to download the desktop app.
+const RELEASES_URL = 'https://github.com/micahshippee/ptz-pad/releases/latest';
 const HOST = { server: 'host:ptz-pad', mcp: null, state: 'starting', info: null };
 
 /* ================= protocols ================= */
@@ -3599,6 +3624,115 @@ $('aimReset').onclick = () => { const c = activeCam(); if (c) moveAim(c, 0, 0, t
 $('lockBtn').onclick = () => toggleLock();
 $('spdUp').onclick = () => setSpeed(state.settings.maxSpeed + 0.1);
 $('spdDown').onclick = () => setSpeed(state.settings.maxSpeed - 0.1);
+
+/* ================= updates =================
+   Every copy checks version.json on the GitHub Pages site (built from CHANGELOG.md by
+   each release). A newer version shows a notice with its notes: the desktop app and a
+   local copy link to the download, the web version offers a reload. Nothing updates on
+   its own, so a show is never interrupted. After updating, What's new shows once. */
+const UPDATE_FEED = 'https://micahshippee.github.io/ptz-pad/version.json';
+const UPDATE_KEY = 'ptzpad.update';
+const UPD = { feed: null, mode: null }; // mode: 'available' | 'new'
+const cmpVer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  return 0;
+};
+function updStore(patch) {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem(UPDATE_KEY) || '{}') || {}; } catch (e) {}
+  if (patch) { Object.assign(s, patch); try { localStorage.setItem(UPDATE_KEY, JSON.stringify(s)); } catch (e) {} }
+  return s;
+}
+// The web version on Pages reloads to update; every other copy downloads the new installer.
+const UPDATE_BY_RELOAD = SECURE_WEB && location.href.startsWith(UPDATE_FEED.replace(/version\.json$/, ''));
+function mdLite(md) {
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const inline = (s) => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  let html = '', inList = false;
+  for (const raw of String(md).split(/\r?\n/)) {
+    const line = raw.trim();
+    const li = /^[-*]\s+(.*)$/.exec(line);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+    if (inList) { html += '</ul>'; inList = false; }
+    if (!line) continue;
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    html += h ? `<h3>${inline(h[1])}</h3>` : `<p>${inline(line)}</p>`;
+  }
+  return html + (inList ? '</ul>' : '');
+}
+function notesBetween(feed, after, upTo) {
+  const list = (feed && feed.releases || []).filter((r) => cmpVer(r.version, after) > 0 && cmpVer(r.version, upTo) <= 0);
+  if (!list.length) return '';
+  const multi = list.length > 1;
+  return list.map((r) => (multi ? `<h3>${r.version}${r.date ? ' · ' + r.date : ''}</h3>` : '') + mdLite(r.notes)).join('');
+}
+function showUpdate(mode) {
+  const feed = UPD.feed;
+  UPD.mode = mode;
+  const bar = $('updateBar');
+  if (mode === 'available') {
+    $('updTitle').textContent = `PTZ Pad ${feed.version} is available`;
+    $('updSub').textContent = UPDATE_BY_RELOAD
+      ? `You have ${APP_VERSION}. Reload when you’re off air; your cameras and settings stay.`
+      : `You have ${APP_VERSION}. Download and install it when you’re off air; your cameras and settings stay.`;
+    $('updGo').textContent = UPDATE_BY_RELOAD ? 'Reload now' : 'Download';
+    $('updGo').hidden = false;
+    $('updNotes').innerHTML = notesBetween(feed, APP_VERSION, feed.version) || '<p>See the release page for details.</p>';
+  } else {
+    const from = updStore().seen;
+    $('updTitle').textContent = `Updated to PTZ Pad ${APP_VERSION}`;
+    $('updSub').textContent = 'Here’s what’s new.';
+    $('updGo').hidden = true;
+    $('updNotes').innerHTML = notesBetween(feed, from, APP_VERSION) || '';
+    if (!$('updNotes').innerHTML) { bar.hidden = true; updStore({ seen: APP_VERSION }); return; }
+  }
+  $('updLater').textContent = mode === 'available' ? 'Later' : 'Got it';
+  bar.hidden = false;
+  $('updChip').hidden = true;
+}
+$('updGo').onclick = () => {
+  if (UPDATE_BY_RELOAD) { location.reload(); return; }
+  window.open((UPD.feed && UPD.feed.download) || 'https://github.com/micahshippee/ptz-pad/releases/latest', '_blank', 'noopener');
+};
+$('updLater').onclick = () => {
+  $('updateBar').hidden = true;
+  if (UPD.mode === 'available') {
+    updStore({ snoozed: UPD.feed.version });
+    $('updChipBtn').textContent = `${UPD.feed.version} available`;
+    $('updChip').hidden = false;
+  } else {
+    updStore({ seen: APP_VERSION });
+    checkUpdates(); // an even newer version may be out
+  }
+};
+$('updChipBtn').onclick = () => showUpdate('available');
+async function checkUpdates() {
+  let feed;
+  try {
+    const r = await timed(`${UPDATE_FEED}?t=${Date.now()}`, {}, 6000);
+    if (!r.ok) return;
+    feed = await r.json();
+  } catch (e) { return; } // offline or blocked: try again later
+  if (!feed || !feed.version) return;
+  UPD.feed = feed;
+  const st = updStore();
+  if (st.seen && cmpVer(st.seen, APP_VERSION) < 0 && $('updateBar').hidden) { showUpdate('new'); return; }
+  if (!st.seen) updStore({ seen: APP_VERSION });
+  if (cmpVer(feed.version, APP_VERSION) <= 0) { $('updChip').hidden = true; return; }
+  if (!$('updateBar').hidden && UPD.mode === 'available') { showUpdate('available'); return; }
+  if (st.snoozed === feed.version) {
+    $('updChipBtn').textContent = `${feed.version} available`;
+    $('updChip').hidden = false;
+  } else if ($('updateBar').hidden) showUpdate('available');
+}
+if (!HOSTED) {
+  setTimeout(checkUpdates, 4000);
+  setInterval(checkUpdates, 2 * 60 * 60 * 1000);
+}
 
 /* ================= boot ================= */
 if (!activeCam() && state.cams.length) state.activeId = state.cams[0].id;

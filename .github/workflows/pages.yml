@@ -1,10 +1,10 @@
 name: Publish web version
-# Builds the installable web version and publishes it to GitHub Pages.
+# Builds the installable web version and its update feed (version.json) and publishes
+# them to GitHub Pages. "Release PTZ Pad" runs this after each release, so the web
+# version and the update notice always match the installers. You can also run it by hand.
 # One-time setup: Settings > Pages > Build and deployment > Source: GitHub Actions.
 on:
-  push:
-    branches: [main]
-    paths: ['app/**', 'web/**', 'tools/build-web.js', 'package.json', '.github/workflows/pages.yml']
+  workflow_call:
   workflow_dispatch:
 
 permissions:

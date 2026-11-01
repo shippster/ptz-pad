@@ -1,19 +1,51 @@
-name: Build PTZ Pad
-# Builds installers for Windows, Mac and Linux.
-# Run it by hand from the Actions tab to get test builds, or push a version tag
-# (git tag v1.12.0 && git push origin v1.12.0) to publish them as a GitHub Release.
+name: Release PTZ Pad
+# Every push to main checks the version in package.json. If that version hasn't been
+# released yet, this builds the Windows, Mac and Linux installers, publishes a GitHub
+# release with the notes from CHANGELOG.md, and updates the web version on GitHub Pages.
+# Every copy of PTZ Pad then shows an update notice with those notes.
+# Pushes that don't change the version reach no one. Start a new version with:
+#   node tools/bump.js patch   (then write the notes in CHANGELOG.md, commit, push)
+# Run it by hand from the Actions tab for test installers without a release.
 on:
-  workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - id: v
+        name: Is this a new version?
+        run: |
+          v=$(node tools/check-version.js)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$v is already released. Nothing to publish. Run node tools/bump.js to start a new version."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Releasing v$v"
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -21,29 +53,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Check the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          v=$(node -p "require('./package.json').version")
-          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $v. Update both to the same number."
-            exit 1
-          fi
-      - name: Let the web version use this app's bridge
-        # Stamps your GitHub Pages address into package.json, so the bridge built into
-        # the app accepts commands from that page and refuses every other website.
-        shell: bash
-        run: |
-          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          repo="${{ github.event.repository.name }}"
-          if [ "$(echo "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then
-            home="https://$owner.github.io/"
-          else
-            home="https://$owner.github.io/$repo/"
-          fi
-          npm pkg set homepage="$home"
-          echo "Bridge will accept commands from $home"
       - run: npm install
       - run: npx electron-builder --publish never
         env:
@@ -58,26 +67,43 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [check, build]
+    if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: installers, merge-multiple: true }
-      - run: ls -la installers
+      - name: Write the release notes
+        run: |
+          {
+            node tools/release-notes.js "${{ needs.check.outputs.version }}"
+            echo
+            echo "## Download"
+            echo "- **Windows:** \`PTZ-Pad-Setup-*.exe\` installs it. \`PTZ-Pad-Portable-*.exe\` runs without installing."
+            echo "- **Mac:** the \`.dmg\`. The first time, right-click PTZ Pad and choose Open."
+            echo "- **Linux:** the \`.AppImage\`. Make it executable, then run it."
+            echo "- **Web version:** https://micahshippee.github.io/ptz-pad/ (Chrome or Edge, with PTZ Pad open on the same computer)"
+            echo
+            echo "The apps aren't code-signed yet, so Windows and macOS warn on first launch. Choose More info then Run anyway on Windows; right-click then Open on Mac."
+          } > notes.md
+          cat notes.md
       - uses: softprops/action-gh-release@v2
         with:
-          name: PTZ Pad ${{ github.ref_name }}
+          tag_name: v${{ needs.check.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: PTZ Pad ${{ needs.check.outputs.version }}
+          body_path: notes.md
           files: installers/*
-          generate_release_notes: true
-          body: |
-            ## Download
-            - **Windows:** `PTZ-Pad-Setup-*.exe` installs it. `PTZ-Pad-Portable-*.exe` runs without installing.
-            - **Mac:** the `.dmg`. The first time, right-click PTZ Pad and choose Open.
-            - **Linux:** the `.AppImage`. Make it executable, then run it.
+          make_latest: true
 
-            The apps aren't code-signed yet, so Windows and macOS warn on first launch. See First launch notes in the README.
-
-            While the desktop app is open it also runs the bridge for the web version, so the web version works on the same computer.
+  web:
+    needs: [check, release]
+    if: needs.check.outputs.release == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

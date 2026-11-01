@@ -26,26 +26,23 @@ npm run dist:linux   # Linux: .AppImage
 
 The files land in `dist/`. After that you can install PTZ Pad like any other app and never touch a terminal again.
 
-No build machine? Push this folder to a GitHub repository, open the Actions tab, run "Build PTZ Pad", and download the installers for all three systems from the finished run.
+No build machine? Push this folder to a GitHub repository, open the Actions tab, run "Release PTZ Pad", and download the installers for all three systems from the finished run.
 
-## Publish on GitHub
+## Releases and updates
 
-The repository publishes two things: installers on the Releases page, and an installable web version on GitHub Pages.
+PTZ Pad lives at https://github.com/micahshippee/ptz-pad. Installers are on the [Releases page](https://github.com/micahshippee/ptz-pad/releases/latest), and the web version is at https://micahshippee.github.io/ptz-pad/.
 
-**One-time setup**
+**One-time setup:** in the repository, open Settings, then Pages, and under Build and deployment set Source to **GitHub Actions**.
 
-1. Create a repository (for example `ptz-pad`) and push this folder to its `main` branch.
-2. In the repository, open Settings, then Pages, and under Build and deployment set Source to **GitHub Actions**.
+**Shipping an update**
 
-**Web version.** Every push to `main` that changes the app republishes it at `https://YOUR-NAME.github.io/ptz-pad/`. You can also run "Publish web version" by hand from the Actions tab.
+1. `node tools/bump.js patch` (or `minor`, `major`, or a number like `1.13.0`). This sets the version in `package.json` and the app, and adds a section to `CHANGELOG.md`.
+2. Write the notes under that section, for the people running cameras: what changed and anything they need to do.
+3. Commit and push to `main`.
 
-**New release**
+"Release PTZ Pad" then builds the Windows, Mac and Linux installers, publishes a release with your notes, and updates the web version and its update feed (`version.json`). It refuses to run if the version numbers disagree or the notes are empty. Pushes that don't change the version reach no one.
 
-1. Change the version in `package.json` and `APP_VERSION` in `app/ptz-controller.html` to the same number.
-2. Commit, then tag and push: `git tag v1.12.0 && git push origin main v1.12.0`
-3. "Build PTZ Pad" builds Windows, Mac and Linux installers and attaches them to a new release. Share `https://github.com/YOUR-NAME/ptz-pad/releases/latest`.
-
-The build stamps your Pages address into the app, so the desktop app's bridge accepts commands from your web version and refuses every other website.
+**What people see.** Within a few hours (or on next launch), every copy shows a notice with the new notes. The desktop app links to the download; the web version offers a reload. Nothing updates on its own, so a show is never interrupted. Choosing Later leaves a small "available" chip at the top. After updating, PTZ Pad shows What's new once.
 
 ## The web version
 
@@ -180,13 +177,7 @@ Camera control works only in the Claude desktop app, on the computer where the h
 
 `npm run bridge` and open http://localhost:8787 in Chrome or Edge. The same app runs there, using the bridge over HTTP, and you can install it as an app from that address too. Other devices on your network can open `http://THIS-COMPUTER:8787`.
 
-The same bridge serves the web version on GitHub Pages. It only takes commands from its own pages, from localhost, and from the `homepage` address in `package.json`. Release builds fill that in automatically. If you run the bridge from a copy of this folder, set it once:
-
-```
-npm pkg set homepage=https://YOUR-NAME.github.io/ptz-pad/
-```
-
-or allow extra addresses with the `PTZ_PAD_ORIGINS` environment variable, comma separated.
+The same bridge serves the web version on GitHub Pages. It only takes commands from its own pages, from localhost, and from the `homepage` address in `package.json`. It's set to https://micahshippee.github.io/ptz-pad/. To allow other addresses too, list them in the `PTZ_PAD_ORIGINS` environment variable, comma separated.
 
 ## Files
 
@@ -198,5 +189,6 @@ or allow extra addresses with the `PTZ_PAD_ORIGINS` environment variable, comma 
 - `main.js` and `preload.js` wrap both into the desktop app.
 - `ptz-bridge.js` starts the browser-mode bridge on its own; `bridge-server.js` is the bridge itself, also run by the desktop app.
 - `web/` holds the web version's manifest, service worker and icons; `tools/build-web.js` assembles the GitHub Pages site.
-- `.github/workflows/` builds the installers and releases (`build.yml`) and publishes the web version (`pages.yml`).
+- `.github/workflows/` releases each new version (`build.yml`) and publishes the web version (`pages.yml`).
+- `CHANGELOG.md` holds the release notes; `tools/bump.js` starts a version; `tools/check-version.js` and `tools/release-notes.js` are used by the release.
 - `helper/ptz-pad-mcp.js` is the helper the Claude desktop app runs for the claude.ai page.
