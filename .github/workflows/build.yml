@@ -1,0 +1,83 @@
+name: Build PTZ Pad
+# Builds installers for Windows, Mac and Linux.
+# Run it by hand from the Actions tab to get test builds, or push a version tag
+# (git tag v1.12.0 && git push origin v1.12.0) to publish them as a GitHub Release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $v. Update both to the same number."
+            exit 1
+          fi
+      - name: Let the web version use this app's bridge
+        # Stamps your GitHub Pages address into package.json, so the bridge built into
+        # the app accepts commands from that page and refuses every other website.
+        shell: bash
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          repo="${{ github.event.repository.name }}"
+          if [ "$(echo "$repo" | tr '[:upper:]' '[:lower:]')" = "$owner.github.io" ]; then
+            home="https://$owner.github.io/"
+          else
+            home="https://$owner.github.io/$repo/"
+          fi
+          npm pkg set homepage="$home"
+          echo "Bridge will accept commands from $home"
+      - run: npm install
+      - run: npx electron-builder --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ptz-pad-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: installers, merge-multiple: true }
+      - run: ls -la installers
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: PTZ Pad ${{ github.ref_name }}
+          files: installers/*
+          generate_release_notes: true
+          body: |
+            ## Download
+            - **Windows:** `PTZ-Pad-Setup-*.exe` installs it. `PTZ-Pad-Portable-*.exe` runs without installing.
+            - **Mac:** the `.dmg`. The first time, right-click PTZ Pad and choose Open.
+            - **Linux:** the `.AppImage`. Make it executable, then run it.
+
+            The apps aren't code-signed yet, so Windows and macOS warn on first launch. See First launch notes in the README.
+
+            While the desktop app is open it also runs the bridge for the web version, so the web version works on the same computer.

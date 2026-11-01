@@ -1,0 +1,85 @@
+{
+  "name": "ptz-pad",
+  "productName": "PTZ Pad",
+  "version": "1.12.0",
+  "description": "Drive PTZ cameras with an Xbox controller. VISCA, NDI, PTZOptics, Panasonic, Axis and custom HTTP, with auto-tracking from NDI, RTSP or SRT video.",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "bridge": "node ptz-bridge.js",
+    "helper": "node helper/ptz-pad-mcp.js",
+    "postinstall": "node tools/get-models.js",
+    "web": "node tools/build-web.js"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "app.ptzpad.controller",
+    "productName": "PTZ Pad",
+    "files": [
+      "main.js",
+      "preload.js",
+      "bridge-core.js",
+      "ndi-core.js",
+      "video-worker.js",
+      "video-core.js",
+      "bridge-server.js",
+      "web/**",
+      "app/**",
+      "tracker/**",
+      "models/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "artifactName": "PTZ-Pad-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "PTZ-Pad-Portable-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "PTZ Pad finds NDI cameras and sends them pan, tilt, zoom and preset commands on your local network.",
+        "NSBluetoothAlwaysUsageDescription": "PTZ Pad uses Bluetooth game controllers to drive your cameras.",
+        "NSBonjourServices": [
+          "_ndi._tcp"
+        ],
+        "NSCameraUsageDescription": "PTZ Pad shows the picture from USB, USB-C and built-in cameras and follows the speaker in it."
+      }
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Video"
+    },
+    "asarUnpack": [
+      "node_modules/koffi/**",
+      "node_modules/ffmpeg-static/**"
+    ]
+  },
+  "dependencies": {
+    "koffi": "^2.9.0",
+    "@mediapipe/tasks-vision": "^0.10.14"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0"
+  },
+  "ptzpadInstall": "1.4.0"
+}
