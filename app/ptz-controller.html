@@ -798,7 +798,7 @@ const WEB_APP = !VIA_HELPER && /^https?:$/.test(location.protocol);
 // so every command goes through the bridge on this computer (http://localhost is allowed).
 const SECURE_WEB = WEB_APP && location.protocol === 'https:';
 // Where to download the desktop app.
-const RELEASES_URL = 'https://github.com/micahshippee/ptz-pad/releases/latest';
+const RELEASES_URL = 'https://github.com/shippster/ptz-pad/releases/latest';
 const HOST = { server: 'host:ptz-pad', mcp: null, state: 'starting', info: null };
 
 /* ================= protocols ================= */
@@ -3630,7 +3630,7 @@ $('spdDown').onclick = () => setSpeed(state.settings.maxSpeed - 0.1);
    each release). A newer version shows a notice with its notes: the desktop app and a
    local copy link to the download, the web version offers a reload. Nothing updates on
    its own, so a show is never interrupted. After updating, What's new shows once. */
-const UPDATE_FEED = 'https://micahshippee.github.io/ptz-pad/version.json';
+const UPDATE_FEED = 'https://shippster.github.io/ptz-pad/version.json';
 const UPDATE_KEY = 'ptzpad.update';
 const UPD = { feed: null, mode: null }; // mode: 'available' | 'new'
 const cmpVer = (a, b) => {
@@ -3696,7 +3696,7 @@ function showUpdate(mode) {
 }
 $('updGo').onclick = () => {
   if (UPDATE_BY_RELOAD) { location.reload(); return; }
-  window.open((UPD.feed && UPD.feed.download) || 'https://github.com/micahshippee/ptz-pad/releases/latest', '_blank', 'noopener');
+  window.open((UPD.feed && UPD.feed.download) || 'https://github.com/shippster/ptz-pad/releases/latest', '_blank', 'noopener');
 };
 $('updLater').onclick = () => {
   $('updateBar').hidden = true;

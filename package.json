@@ -84,9 +84,9 @@
     "ffmpeg-static": "^5.2.0"
   },
   "ptzpadInstall": "1.4.0",
-  "homepage": "https://micahshippee.github.io/ptz-pad/",
+  "homepage": "https://shippster.github.io/ptz-pad/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/micahshippee/ptz-pad.git"
+    "url": "https://github.com/shippster/ptz-pad.git"
   }
 }

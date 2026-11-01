@@ -30,7 +30,7 @@ No build machine? Push this folder to a GitHub repository, open the Actions tab,
 
 ## Releases and updates
 
-PTZ Pad lives at https://github.com/micahshippee/ptz-pad. Installers are on the [Releases page](https://github.com/micahshippee/ptz-pad/releases/latest), and the web version is at https://micahshippee.github.io/ptz-pad/.
+PTZ Pad lives at https://github.com/shippster/ptz-pad. Installers are on the [Releases page](https://github.com/shippster/ptz-pad/releases/latest), and the web version is at https://shippster.github.io/ptz-pad/.
 
 **One-time setup:** in the repository, open Settings, then Pages, and under Build and deployment set Source to **GitHub Actions**.
 
@@ -177,7 +177,7 @@ Camera control works only in the Claude desktop app, on the computer where the h
 
 `npm run bridge` and open http://localhost:8787 in Chrome or Edge. The same app runs there, using the bridge over HTTP, and you can install it as an app from that address too. Other devices on your network can open `http://THIS-COMPUTER:8787`.
 
-The same bridge serves the web version on GitHub Pages. It only takes commands from its own pages, from localhost, and from the `homepage` address in `package.json`. It's set to https://micahshippee.github.io/ptz-pad/. To allow other addresses too, list them in the `PTZ_PAD_ORIGINS` environment variable, comma separated.
+The same bridge serves the web version on GitHub Pages. It only takes commands from its own pages, from localhost, and from the `homepage` address in `package.json`. It's set to https://shippster.github.io/ptz-pad/. To allow other addresses too, list them in the `PTZ_PAD_ORIGINS` environment variable, comma separated.
 
 ## Files
 

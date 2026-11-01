@@ -85,7 +85,7 @@ jobs:
             echo "- **Windows:** \`PTZ-Pad-Setup-*.exe\` installs it. \`PTZ-Pad-Portable-*.exe\` runs without installing."
             echo "- **Mac:** the \`.dmg\`. The first time, right-click PTZ Pad and choose Open."
             echo "- **Linux:** the \`.AppImage\`. Make it executable, then run it."
-            echo "- **Web version:** https://micahshippee.github.io/ptz-pad/ (Chrome or Edge, with PTZ Pad open on the same computer)"
+            echo "- **Web version:** https://shippster.github.io/ptz-pad/ (Chrome or Edge, with PTZ Pad open on the same computer)"
             echo
             echo "The apps aren't code-signed yet, so Windows and macOS warn on first launch. Choose More info then Run anyway on Windows; right-click then Open on Mac."
           } > notes.md
