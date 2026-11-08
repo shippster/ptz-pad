@@ -1,15 +1,18 @@
 // Pure tracking helpers: turn pose landmarks into people, and keep following one of them.
 // MediaPipe pose landmark indices
-const NOSE = 0, L_EYE = 2, R_EYE = 5, L_SH = 11, R_SH = 12, L_HIP = 23, R_HIP = 24;
+const NOSE = 0, L_EYE = 2, R_EYE = 5, L_EAR = 7, R_EAR = 8, L_SH = 11, R_SH = 12, L_EL = 13, R_EL = 14, L_WR = 15, R_WR = 16,
+  L_HIP = 23, R_HIP = 24, L_KN = 25, R_KN = 26, L_AN = 27, R_AN = 28;
 const seen = (p) => !!p && (p.visibility == null || p.visibility > 0.5);
+const sure = (p) => !!p && (p.visibility == null || p.visibility > 0.7);
 
 /**
  * One pose (33 normalized landmarks) -> a person summary, or null.
  * x: horizontal center of the upper body; headY: nose height;
  * scale: body size in frame-width units (shoulder width, or head-to-shoulder
  * drop when they turn side-on), used to hold a steady shot size.
+ * build: the person's body proportions from the 3D (world) landmarks, when given.
  */
-export function summarize(lm, aspect = 16 / 9) {
+export function summarize(lm, aspect = 16 / 9, world = null) {
   if (!lm || lm.length < 25) return null;
   const pts = lm.filter(seen);
   if (pts.length < 4) return null;
@@ -30,144 +33,242 @@ export function summarize(lm, aspect = 16 / 9) {
   let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
   for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
   y0 = Math.max(0, y0 - (y1 - y0) * 0.08); // landmarks stop at the face: pad for the top of the head
-  return { x, headY, scale, box: [Math.max(0, x0), y0, Math.min(1, x1), Math.min(1, y1)] };
+  return { x, headY, scale, box: [Math.max(0, x0), y0, Math.min(1, x1), Math.min(1, y1)], build: buildOf(lm, world) };
 }
 
 const dist = (a, b) => Math.hypot(a.x - b.x, (a.headY - b.headY) * 0.6);
 const inBox = (pt, b) => pt.x >= b[0] - 0.02 && pt.x <= b[2] + 0.02 && pt.y >= b[1] - 0.02 && pt.y <= b[3] + 0.02;
+export function overlap(a, b) { // intersection over union of two boxes
+  const w = Math.min(a[2], b[2]) - Math.max(a[0], b[0]), h = Math.min(a[3], b[3]) - Math.max(a[1], b[1]);
+  if (w <= 0 || h <= 0) return 0;
+  const i = w * h, u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - i;
+  return u > 0 ? i / u : 0;
+}
 
 /* ---------- who is who ----------
- * A colour signature of each person's shirt (upper body), so the tracker can
- * tell the speaker from someone who walks close by. The signature is a 64-bin
- * colour histogram plus the shirt's main colour, for showing on screen. */
-const BINS = 4; // per channel: 64 colour bins
-// The part of a person's box the shirt colour is read from: the middle of the upper body.
-export function shirtBox(box) {
-  const w = box[2] - box[0], h = box[3] - box[1];
-  return [box[0] + w * 0.2, box[1] + h * 0.18, box[2] - w * 0.2, box[1] + h * 0.6];
-}
-export function signature(data, w, h, box) {
-  const [x0, y0, x1, y1] = shirtBox(box);
-  const px0 = Math.max(0, Math.floor(x0 * w)), px1 = Math.min(w - 1, Math.ceil(x1 * w));
-  const py0 = Math.max(0, Math.floor(y0 * h)), py1 = Math.min(h - 1, Math.ceil(y1 * h));
-  if (px1 - px0 < 4 || py1 - py0 < 4) return null;
-  const n3 = BINS * BINS * BINS;
-  const hist = new Float32Array(n3), sr = new Float32Array(n3), sg = new Float32Array(n3), sb = new Float32Array(n3);
-  const sx = Math.max(1, Math.floor((px1 - px0) / 24)), sy = Math.max(1, Math.floor((py1 - py0) / 24));
-  let n = 0;
-  for (let y = py0; y <= py1; y += sy) {
-    for (let x = px0; x <= px1; x += sx) {
-      const o = (y * w + x) * 4;
-      const r = data[o], g = data[o + 1], b = data[o + 2];
-      const i = ((r * BINS) >> 8) * BINS * BINS + ((g * BINS) >> 8) * BINS + ((b * BINS) >> 8);
-      hist[i]++; sr[i] += r; sg[i] += g; sb[i] += b; n++;
-    }
-  }
-  if (!n) return null;
-  let top = 0;
-  for (let i = 1; i < n3; i++) if (hist[i] > hist[top]) top = i;
-  const rgb = [Math.round(sr[top] / hist[top]), Math.round(sg[top] / hist[top]), Math.round(sb[top] / hist[top])];
-  for (let i = 0; i < n3; i++) hist[i] /= n;
-  return { h: hist, rgb };
-}
-// 1: same colours, 0: nothing in common (Bhattacharyya coefficient).
-export function likeness(a, b) {
-  if (!a || !b) return 0.5;
-  let s = 0;
-  for (let i = 0; i < a.h.length; i++) s += Math.sqrt(a.h[i] * b.h[i]);
-  return s;
-}
-const blend = (a, b, k) => {
-  if (!a) return b; if (!b) return a;
-  const h = new Float32Array(a.h.length);
-  for (let i = 0; i < h.length; i++) h[i] = a.h[i] * (1 - k) + b.h[i] * k;
-  return { h, rgb: a.rgb.map((v, i) => Math.round(v * (1 - k) + b.rgb[i] * k)) };
+ * A person is told apart by two things, neither of them colour:
+ *   1. where they are: the same body moving smoothly from frame to frame, with its own speed;
+ *   2. their build: body proportions measured in 3D by the pose model (shoulder width,
+ *      head size, neck, arms, torso, hips and legs), each compared with their shoulder
+ *      width so it doesn't matter how far away they stand or which way they face.
+ * Clothes, lighting and the colour of the set make no difference to either. */
+const PARTS = {
+  head: [[L_EAR, R_EAR]],
+  neck: 'neck',
+  upperArm: [[L_SH, L_EL], [R_SH, R_EL]],
+  forearm: [[L_EL, L_WR], [R_EL, R_WR]],
+  torso: [[L_SH, L_HIP], [R_SH, R_HIP]],
+  hips: [[L_HIP, R_HIP]],
+  thigh: [[L_HIP, L_KN], [R_HIP, R_KN]],
+  shin: [[L_KN, L_AN], [R_KN, R_AN]],
 };
-const copySig = (s) => (s ? { h: Float32Array.from(s.h), rgb: s.rgb.slice() } : null);
+const len3 = (w, a, b) => Math.hypot(w[a].x - w[b].x, w[a].y - w[b].y, w[a].z - w[b].z);
+/** Body proportions from the world landmarks: { part: log(length / shoulder width) }, or null. */
+export function buildOf(lm, world) {
+  if (!world || world.length < 29 || !sure(lm[L_SH]) || !sure(lm[R_SH])) return null;
+  const sw = len3(world, L_SH, R_SH);
+  if (!(sw > 0.05)) return null;
+  const out = { size: Math.log(sw) };
+  for (const [name, pairs] of Object.entries(PARTS)) {
+    let v;
+    if (pairs === 'neck') {
+      if (!sure(lm[NOSE])) continue;
+      const mid = { x: (world[L_SH].x + world[R_SH].x) / 2, y: (world[L_SH].y + world[R_SH].y) / 2, z: (world[L_SH].z + world[R_SH].z) / 2 };
+      v = Math.hypot(world[NOSE].x - mid.x, world[NOSE].y - mid.y, world[NOSE].z - mid.z);
+    } else {
+      const ls = pairs.filter(([a, b]) => sure(lm[a]) && sure(lm[b])).map(([a, b]) => len3(world, a, b));
+      if (!ls.length) continue;
+      v = ls.reduce((s, x) => s + x, 0) / ls.length;
+    }
+    if (v > 0.01) out[name] = Math.log(v / sw);
+  }
+  return Object.keys(out).length >= 3 ? out : null; // size plus at least two proportions
+}
+/** Adds one measurement to a person's build (running average, then a slow blend). */
+export function learnBuild(model, build) {
+  if (!build) return model;
+  const m = model ? { n: model.n + 1, f: { ...model.f } } : { n: 1, f: {} };
+  for (const [k, x] of Object.entries(build)) {
+    const o = m.f[k];
+    if (!o) { m.f[k] = { m: x, v: 0, n: 1 }; continue; }
+    const a = o.n < 20 ? 1 / (o.n + 1) : 0.05, d = x - o.m;
+    m.f[k] = { m: o.m + a * d, v: (1 - a) * (o.v + a * d * d), n: o.n + 1 };
+  }
+  return m;
+}
+/** How well a measurement fits a learned build: { score 0..1, parts }, or null when there's too little to compare. */
+export function buildMatch(model, build) {
+  if (!model || !build) return null;
+  let s = 0, k = 0;
+  for (const [name, x] of Object.entries(build)) {
+    const o = model.f[name];
+    if (!o || o.n < 5) continue;
+    const tol = name === 'size' ? 0.18 : Math.max(0.07, Math.sqrt(o.v) * 1.5); // about 7% for proportions
+    const z = (x - o.m) / tol;
+    s += Math.min(9, z * z); k++;
+  }
+  return k >= 3 ? { score: Math.exp(-0.5 * (s / k)), parts: k } : null;
+}
 
 function follow(state, p, now, learn) {
   const t = state.target;
   const vx = t && t.at && now > t.at ? (p.x - t.x) / ((now - t.at) / 1000) : 0;
   state.target = {
-    x: p.x, headY: p.headY, scale: p.scale, at: now,
+    x: p.x, headY: p.headY, scale: p.scale, box: p.box, at: now,
     vx: t ? (t.vx || 0) * 0.7 + Math.max(-1, Math.min(1, vx)) * 0.3 : 0,
-    sig: learn ? blend(t && t.sig, p.sig, t && t.sig ? 0.08 : 1) : (t && t.sig) || p.sig,
   };
+  if (learn) state.model = learnBuild(state.model, p.build);
   state.misses = 0;
+  state.amb = 0;
   return p;
+}
+const AMB_MAX = 8; // detections to hold still while people cross, before deciding anyway
+
+/* Everyone else in the shot is followed too, each with their own position and speed, so a
+ * person walking in front of the speaker keeps being that person: while the speaker is hidden
+ * behind them, their detection is claimed by their own track instead of taking over the red box.
+ * Anyone seen in the same frame as the speaker ("together") is certainly someone else, so they
+ * can never become the speaker, however alike they look. People who only appear while the
+ * speaker is out of sight might be the speaker coming back, so they're judged on their own. */
+function predict(o, now) {
+  const gap = Math.min(1, (now - o.at) / 1000);
+  return { x: o.x + (o.vx || 0) * gap, headY: o.headY };
+}
+function moveTrack(o, p, now) {
+  const vx = o.at && now > o.at ? (p.x - o.x) / ((now - o.at) / 1000) : 0;
+  o.vx = (o.vx || 0) * 0.7 + Math.max(-1, Math.min(1, vx)) * 0.3;
+  o.x = p.x; o.headY = p.headY; o.scale = p.scale; o.box = p.box; o.at = now; o.misses = 0; o.seen = (o.seen || 0) + 1;
+}
+const sizeGap = (a, b) => (a.scale > 0.005 && b.scale > 0.005 ? Math.abs(Math.log(b.scale / a.scale)) : 0);
+// How well a detection continues a track (lower is better), or Infinity when it can't be them.
+function trackCost(o, p, now) {
+  const d = dist(p, predict(o, now));
+  return d < 0.15 ? d / 0.1 + sizeGap(o, p) * 0.8 : Infinity;
+}
+function updateOthers(state, people, chosen, now) {
+  const others = state.others || [];
+  const free = people.filter((p) => p !== chosen);
+  const pairs = [];
+  for (const o of others) for (const p of free) { const c = trackCost(o, p, now); if (c < Infinity) pairs.push([c, o, p]); }
+  pairs.sort((a, b) => a[0] - b[0]);
+  const usedO = new Set(), usedP = new Set();
+  for (const [, o, p] of pairs) {
+    if (usedO.has(o) || usedP.has(p)) continue;
+    usedO.add(o); usedP.add(p); moveTrack(o, p, now);
+  }
+  for (const o of others) if (!usedO.has(o)) o.misses = (o.misses || 0) + 1;
+  for (const p of free) {
+    if (usedP.has(p) || (chosen && overlap(p.box, chosen.box) > 0.5)) continue; // a double of the speaker
+    const o = { at: now }; moveTrack(o, p, now); o.vx = 0; others.push(o); usedO.add(o);
+  }
+  if (chosen) for (const o of usedO) o.together = true; // seen alongside the speaker
+  state.others = others.filter((o) => o.misses <= 20);
 }
 
 /**
  * Chooses who to follow. state is kept per camera between frames:
- *   target   the person being followed
+ *   target   the person being followed (where they are and how fast they move)
+ *   model    their build, learned while they're clearly on their own
+ *   others   everyone else in the shot, each followed the same way
  *   misses   detections in a row without them
- *   held     a shirt colour locked with the controller; while set, PTZ Pad never
- *            follows anyone whose shirt doesn't match, and never gives up on it
- *   lock     {x, y}: a click or pop-up pick
- *   holdReq  lock the colour of whoever is followed next
+ *   held     locked on this one person: PTZ Pad never follows anyone else and
+ *            never gives up on them, until the operator unlocks or picks someone
+ *   lock     {x, y}: a click or pop-up pick (the operator choosing a person)
+ *   holdReq  lock on whoever is followed next
+ *   amb      detections held still while two people cross
  *   cfg      { missFrames, holdMatch } from the dashboard
- * Without a colour lock, the red box stays on the speaker until they have been
- * missing for missFrames detections in a row; only then is someone else chosen.
+ * Without a lock, the red box stays on the speaker until they have been missing
+ * for missFrames detections in a row; only then is someone else chosen.
  */
 export function pick(state, people, now = performance.now()) {
   const cfg = state.cfg || {};
   const missMax = Math.max(1, cfg.missFrames || 10);
   const holdMin = cfg.holdMatch || 0.6;
+  state.crossing = false;
   const done = (p) => {
-    if (p && state.holdReq) { state.held = copySig(state.target.sig || p.sig); state.holdReq = false; }
+    if (p && state.holdReq && state.target) { state.held = true; state.holdReq = false; }
+    updateOthers(state, people, p, now);
     return p;
   };
-  if (state.lock) { // picked by hand: follow them (and re-lock on their shirt if locked)
+  if (state.lock) { // picked by hand: a new person. Their build is learned from scratch.
     const pt = state.lock;
     state.lock = null;
     const hit = people.find((p) => inBox(pt, p.box))
       || people.slice().sort((a, b) => dist(a, { x: pt.x, headY: pt.y }) - dist(b, { x: pt.x, headY: pt.y }))[0];
     if (hit) {
       if (state.held) state.holdReq = true;
-      state.target = null;
+      // The person who was followed becomes one of the others.
+      if (state.target) (state.others = state.others || []).push({ ...state.target, misses: 0, together: true });
+      state.others = (state.others || []).filter((o) => !(o.box && overlap(o.box, hit.box) > 0.5));
+      state.held = false; state.target = null; state.model = null;
       return done(follow(state, hit, now, true));
     }
   }
   const t = state.target;
   if (t) {
-    const held = state.held;
-    const gap = Math.min(1, (now - t.at) / 1000); // seconds since last seen
-    const pred = { x: t.x + (t.vx || 0) * gap, headY: t.headY };
+    const held = !!state.held;
+    const pred = predict(t, now);
+    const shift = pred.x - t.x;
+    const predBox = t.box ? [t.box[0] + shift, t.box[1], t.box[2] + shift, t.box[3]] : null;
     const misses = state.misses || 0;
     const reach = 0.1 + Math.min(0.35, misses * 0.02); // look wider the longer they're gone
+    // Locked: they're only picked back up close to where they were lost (the search area grows
+    // slowly), or anywhere once they've been gone a while and their build clearly matches.
+    const heldReach = 0.1 + Math.min(0.2, misses * 0.01);
+    const learned = state.model && state.model.n >= 20;
+    const others = (state.others || []).filter((o) => o.together);
+    const near = people.filter((p) => dist(p, pred) < reach || (predBox && overlap(p.box, predBox) > 0.05));
+    const crowded = near.length > 1 || others.some((o) => o.misses === 0 && dist(o, pred) < 0.15);
     let best = null, bc = Infinity, second = Infinity;
     for (const p of people) {
       const d = dist(p, pred);
-      const like = likeness(held || t.sig, p.sig);
-      const size = t.scale > 0.005 && p.scale > 0.005 ? Math.abs(Math.log(p.scale / t.scale)) : 0;
-      // Locked: only the locked shirt colour, anywhere in the shot once they've been missed.
-      // Not locked: near where they should be and similar, or far away only if clearly the same.
-      const ok = held ? like >= holdMin && (d < reach || misses > 0)
-        : (d < reach && like > 0.45) || (misses > 0 && like > 0.8 && size < 0.6);
+      const m = buildMatch(state.model, p.build);
+      const like = m ? m.score : null;
+      const size = sizeGap(t, p);
+      const strong = learned && m && m.parts >= 4 && like >= Math.max(0.85, holdMin + 0.2);
+      // Someone else's track fits this detection about as well: it's them, not the speaker.
+      const mine = d / 0.1 + size * 0.8;
+      const claimed = others.some((o) => trackCost(o, p, now) < mine + 0.3);
+      let ok;
+      if (misses <= 2) {
+        // Still in sight: the same body moving smoothly. Build only rules out a clear mismatch
+        // (someone half hidden measures badly).
+        ok = !claimed && d < reach && size < 0.7 && (like == null || like >= (held ? holdMin * 0.5 : 0.25));
+      } else if (held) {
+        ok = !claimed && ((d < heldReach && (like == null || like >= holdMin)) || (misses >= missMax && strong));
+      } else {
+        ok = (!claimed && d < reach && (like == null || like > 0.4)) || (like != null && like > 0.8 && size < 0.6 && !claimed);
+      }
       if (!ok) continue;
-      const cost = d / reach + (1 - like) * (held ? 4 : 2.5) + size * 0.8;
+      const cost = d / reach + size * 0.8 + (like == null ? 0.3 : (1 - like) * (crowded ? 2.5 : 1.2));
       if (cost < bc) { second = bc; bc = cost; best = p; } else if (cost < second) second = cost;
     }
     if (best) {
-      // A locked colour never changes. Otherwise, colours are only learned from a clear frame
-      // (two people about as likely, like when they cross, teaches nothing).
-      return done(follow(state, best, now, !held && second - bc > 0.4));
+      // Two people about as likely (they're crossing): hold still rather than guess, for a moment.
+      if (crowded && second - bc < 0.35 && misses === 0 && (state.amb || 0) < AMB_MAX) {
+        state.amb = (state.amb || 0) + 1;
+        state.crossing = true;
+        return null;
+      }
+      // Build is only learned from a clear frame, with nobody else close by.
+      return done(follow(state, best, now, !crowded && second - bc > 0.4));
     }
     state.misses = misses + 1;
-    // Only choose someone else after missFrames detections in a row without the speaker,
-    // and never while a colour is locked.
-    if (!held && state.misses >= missMax) state.target = null;
-    return null;
+    const behind = others.some((o) => o.misses === 0 && dist(o, pred) < 0.2); // hidden behind someone
+    if (behind) state.crossing = true;
+    // Only choose someone else after missFrames detections in a row without the speaker (three
+    // times as long while they're hidden behind someone), and never while locked.
+    if (!held && state.misses >= missMax * (behind ? 3 : 1)) { state.target = null; state.model = null; }
+    return done(null);
   }
-  // Nobody followed yet: take the person nearest the center of the shot (locked: the best colour match).
-  if (state.held) {
-    const best = people.map((p) => [p, likeness(state.held, p.sig)]).filter((x) => x[1] >= holdMin).sort((a, b) => b[1] - a[1])[0];
-    return best ? done(follow(state, best[0], now, false)) : null;
-  }
+  // Nobody followed yet: take the person nearest the center of the shot.
   // Size only breaks a near-tie (two people about equally central: the nearer one).
   const score = (p) => -Math.hypot(p.x - 0.5, (p.headY - 0.4) * 0.5) + p.scale * 0.05;
   const best = people.slice().sort((a, b) => score(b) - score(a))[0];
-  return best ? done(follow(state, best, now, true)) : null;
+  if (!best) return done(null);
+  state.model = null;
+  state.others = [];
+  return done(follow(state, best, now, true));
 }
 
 /* ---------- camera motion ----------

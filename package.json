@@ -1,7 +1,7 @@
 {
   "name": "ptz-pad",
   "productName": "PTZ Pad",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "description": "Drive PTZ cameras with an Xbox controller. VISCA, NDI, PTZOptics, Panasonic, Axis and custom HTTP, with auto-tracking from NDI, RTSP or SRT video.",
   "main": "main.js",
   "license": "MIT",

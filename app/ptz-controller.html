@@ -144,9 +144,11 @@ p{margin:0}
 .tune-ends{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);margin-top:4px}
 .tune-head output.small{font:600 15px/1.2 var(--cond);text-align:right}
 .lockchip{display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 3px;border-radius:5px;background:var(--tally);color:#fff;font:700 13px/1.2 var(--cond);letter-spacing:.03em}
-.lockchip i{width:16px;height:16px;border-radius:3px;border:1px solid rgba(255,255,255,.85)}
+.lockchip i{width:16px;height:16px;display:grid;place-items:center}.lockchip i svg{width:15px;height:15px}
 .lockrow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;margin-bottom:4px}
-.swatch{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:repeating-linear-gradient(45deg,var(--raise) 0 5px,var(--field) 5px 10px)}
+.swatch{width:30px;height:30px;border-radius:7px;border:1px solid var(--line);background:var(--field);color:var(--dim);display:grid;place-items:center;flex:none}
+.swatch svg{width:20px;height:20px}
+.swatch.on{background:var(--tally);border-color:var(--tally);color:#fff}
 .lockinfo{display:flex;flex-direction:column;min-width:0;line-height:1.25}
 .lockinfo b{font:600 15px/1.2 var(--cond)}
 .lockinfo span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -460,7 +462,7 @@ h2{font-size:16px;margin:0}
         <span>Focus <b id="rFocus">0</b></span>
         <span id="rTarget">No camera selected</span>
         <span id="rAir"></span>
-        <span id="rLock" class="lockchip" hidden><i></i><span></span></span>
+        <span id="rLock" class="lockchip" hidden><i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="currentColor"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z" fill="currentColor"/></svg></i><span></span></span>
       </div>
       <p class="hint" id="trackStatus" hidden style="margin:0"></p>
     </div>
@@ -502,7 +504,7 @@ h2{font-size:16px;margin:0}
     <div class="block" id="trackBlock">
       <h2>Auto-tracking</h2>
       <div class="lockrow">
-        <span class="swatch" id="lockSwatch" aria-hidden="true"></span>
+        <span class="swatch" id="lockSwatch" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="currentColor"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z" fill="currentColor"/></svg></span>
         <div class="lockinfo"><b id="lockState">Not locked</b><span id="lockColor"></span></div>
         <button class="btn" type="button" id="lockBtn" title="Lock on the speaker in the red box (L on the keyboard). On the controller, A locks as it starts tracking.">Lock</button>
       </div>
@@ -729,7 +731,7 @@ h2{font-size:16px;margin:0}
       <div class="set-row"><span>Comfort zone (bigger moves less often)</span><output id="oTZone"></output><input type="range" id="tZone" min="0.04" max="0.25" step="0.01"></div>
       <label class="f"><span>Precision mode while tracking</span><select id="tPrec"><option value="rb">Slows tracking while RB is held</option><option value="always">Always track at precision speed</option><option value="off">Doesn’t affect tracking</option></select></label>
       <div class="set-row"><span>Detections in a row without the speaker before choosing someone else (not while locked)</span><output id="oMiss"></output><input type="range" id="tMiss" min="3" max="60" step="1"></div>
-      <div class="set-row"><span>Lock colour match (higher is stricter; lower if the lock loses the speaker under changing light)</span><output id="oHold"></output><input type="range" id="tHold" min="0.4" max="0.9" step="0.05"></div>
+      <div class="set-row"><span>Lock body match: how closely someone must match the locked person’s build to be picked back up after they’re lost (higher is stricter)</span><output id="oHold"></output><input type="range" id="tHold" min="0.4" max="0.9" step="0.05"></div>
       <label class="f"><span>When the speaker is lost</span><select id="tLost"><option value="hold">Stay where it is</option><option value="preset">Go to a preset</option></select></label>
       <div class="half" id="tLostBox">
         <label class="f"><span>Preset</span><select id="tLostPreset"></select></label>
@@ -802,7 +804,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.13.1'; // keep in step with package.json "version"
+const APP_VERSION = '1.14.0'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -2720,21 +2722,22 @@ function drawTrackView() {
     g.restore();
   }
   const box = (b, color, w) => { g.strokeStyle = color; g.lineWidth = w * dpr; g.strokeRect(b[0] * cvs.width, b[1] * cvs.height, (b[2] - b[0]) * cvs.width, (b[3] - b[1]) * cvs.height); };
+  const tag = (b, label, color) => { // a label on top of a box
+    g.font = `700 ${12 * dpr}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    const tw = g.measureText(label).width + 10 * dpr, th = 18 * dpr;
+    const sx = b[0] * cvs.width, y0 = Math.max(0, b[1] * cvs.height - th);
+    g.fillStyle = color; g.fillRect(sx, y0, tw, th);
+    g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(label, sx + 5 * dpr, y0 + th / 2);
+  };
   if (d && d.people) for (const b of d.people) box(b, 'rgba(231,234,238,.75)', 1.5);
   if (d && d.found && d.box) {
     box(d.box, '#ff4a3d', d.locked ? 4 : 3);
-    if (d.shirt && d.color) { // where the shirt colour is read, and the colour itself
-      g.save(); g.setLineDash([4 * dpr, 4 * dpr]); box(d.shirt, 'rgba(255,255,255,.55)', 1); g.restore();
-      const sx = d.box[0] * cvs.width, sy = d.box[1] * cvs.height, sw = 16 * dpr;
-      const label = d.locked ? 'LOCKED' : '';
-      g.font = `700 ${12 * dpr}px "Barlow Condensed", "Arial Narrow", sans-serif`;
-      const tw = label ? g.measureText(label).width + 8 * dpr : 0;
-      const y0 = Math.max(0, sy - sw - 4 * dpr);
-      g.fillStyle = '#ff4a3d'; g.fillRect(sx, y0, sw + 6 * dpr + tw, sw + 4 * dpr);
-      g.fillStyle = rgbCss(d.color); g.fillRect(sx + 2 * dpr, y0 + 2 * dpr, sw, sw);
-      g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 1 * dpr; g.strokeRect(sx + 2 * dpr, y0 + 2 * dpr, sw, sw);
-      if (label) { g.fillStyle = '#fff'; g.textBaseline = 'middle'; g.fillText(label, sx + sw + 6 * dpr, y0 + (sw + 4 * dpr) / 2); }
-    }
+    if (d.locked) tag(d.box, 'LOCKED', '#ff4a3d');
+  }
+  // Locked and out of sight: where they were last seen, which is where PTZ Pad looks for them.
+  if (d && d.locked && !d.found && d.waitBox) {
+    g.save(); g.setLineDash([6 * dpr, 5 * dpr]); box(d.waitBox, 'rgba(255,74,61,.85)', 2); g.restore();
+    tag(d.waitBox, d.crossing ? 'HOLDING' : 'WAITING', 'rgba(255,74,61,.85)');
   }
   if (POP.open && c === popCam()) { // the person the right stick is on
     const sb = popSelected();
@@ -2754,8 +2757,9 @@ function drawTrackView() {
     : !d ? 'Connecting to the video\u2026'
     : tr.notice && performance.now() < tr.noticeUntil ? tr.notice
     : tr.overridden ? 'Paused while you steer. Let go to resume.'
-    : d && d.locked && !d.found ? `Locked: waiting for the speaker in the ${d.color ? colorName(d.color) + ' ' : ''}shirt. It won\u2019t follow anyone else. Press L to unlock, or A to stop and go back to the preview.`
-    : d && d.locked ? 'Locked on the speaker. Others are ignored. Click someone to lock on them, L unlocks, A stops and goes back to the preview.'
+    : d && d.crossing ? 'Someone is crossing in front of the speaker. Holding still until they\u2019re apart.'
+    : d && d.locked && !d.found ? 'Locked: waiting for this person to come back near the dashed box. It won\u2019t follow anyone else. Click someone to lock on them, L unlocks, A stops and goes back to the preview.'
+    : d && d.locked ? 'Locked on this person. Others are ignored, even if they walk past or cross in front. Click someone to lock on them instead, L unlocks, A stops and goes back to the preview.'
     : d && d.found ? (d.people && d.people.length > 1 ? 'Following the speaker in red. Click someone else to switch.' : 'Following the speaker.')
     : d && d.lost ? `Speaker lost (${d.misses || 0} of ${state.settings.track.missFrames}). The red box stays put until then, then picks someone else.`
     : 'Looking for the speaker\u2026';
@@ -3335,9 +3339,9 @@ function camShown() {
 }
 
 /* ================= speaker lock =================
-   Locks auto-tracking on the speaker in the red box: the tracker freezes the colour of
-   their shirt and from then on follows only someone wearing it, never anyone else,
-   until you unlock or turn auto-tracking off. */
+   Locks auto-tracking on the person in the red box: the tracker stays with that one person,
+   following their body from frame to frame and checking their build (not their clothes),
+   and never moves to anyone else until you pick someone, unlock or turn auto-tracking off. */
 const canHold = () => !!(NATIVE && NATIVE.track && NATIVE.track.hold);
 function sendTrackCfg(id) {
   if (!NATIVE || !NATIVE.track || !NATIVE.track.config) return;
@@ -3413,39 +3417,24 @@ async function toggleLock(camArg) {
   }
   tr.dirty = true; renderLock();
 }
-// A rough colour name, so the lock can be described in words too.
-function colorName([r, g, b]) {
-  const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, l = (mx + mn) / 2, d = mx - mn;
-  const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-  if (l < 0.13) return 'black';
-  if (sat < 0.15) return l > 0.85 ? 'white' : l > 0.6 ? 'light grey' : l > 0.32 ? 'grey' : 'dark grey';
-  let h = 0;
-  const R = r / 255, G = g / 255, B = b / 255;
-  if (mx === R) h = ((G - B) / d) % 6; else if (mx === G) h = (B - R) / d + 2; else h = (R - G) / d + 4;
-  h = (h * 60 + 360) % 360;
-  const base = h < 15 || h >= 345 ? 'red' : h < 40 ? (l < 0.4 ? 'brown' : 'orange') : h < 68 ? (l < 0.35 ? 'olive' : 'yellow')
-    : h < 160 ? 'green' : h < 195 ? 'teal' : h < 250 ? (l < 0.3 ? 'navy' : 'blue') : h < 290 ? 'purple' : 'pink';
-  return (l < 0.3 && !['navy', 'brown', 'olive'].includes(base) ? 'dark ' : l > 0.72 ? 'light ' : '') + base;
-}
-const rgbCss = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
-const rgbHex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
 let lockShown = '';
 function renderLock() {
   const c = activeCam(), tr = c && trackers.get(c.id), d = tr && tr.det;
   const locked = !!(d && d.locked), pending = !!(d && d.lockPending) || !!(tr && tr.lockWant && !locked);
-  const col = d && d.color;
-  const key = [c && c.id, !!tr, locked, pending, col && col.join(), d && d.found].join('|');
+  const found = !!(d && d.found), crossing = !!(d && d.crossing);
+  const key = [c && c.id, !!tr, locked, pending, found, crossing].join('|');
   if (key === lockShown) return;
   lockShown = key;
   $('lockBtn').textContent = locked || pending ? 'Unlock' : 'Lock';
   $('lockBtn').classList.toggle('on', locked || pending);
   $('lockBtn').disabled = !c || PROTOCOLS[c.protocol].kind === 'video' || !!(tr && tr.viewOnly);
-  $('lockSwatch').style.background = col ? rgbCss(col) : '';
+  $('lockSwatch').classList.toggle('on', locked);
   $('rLock').hidden = !(locked || pending);
-  $('rLock').querySelector('i').style.background = col && locked ? rgbCss(col) : 'transparent';
-  $('rLock').querySelector('span').textContent = locked ? `LOCKED \u00b7 ${col ? colorName(col) : ''}` : 'LOCKING\u2026';
-  $('lockState').textContent = !tr ? 'Not tracking' : locked ? 'Locked on the speaker' : pending ? 'Locking…' : 'Not locked';
-  $('lockColor').textContent = col ? `${locked ? 'Shirt' : 'Following'}: ${colorName(col)} ${rgbHex(col)}` : tr ? 'No speaker yet' : 'Press A for a tracking preview';
+  $('rLock').querySelector('span').textContent = locked ? (found ? 'LOCKED ON PERSON' : crossing ? 'LOCKED \u00b7 HOLDING' : 'LOCKED \u00b7 WAITING') : 'LOCKING\u2026';
+  $('lockState').textContent = !tr ? 'Not tracking' : locked ? 'Locked on this person' : pending ? 'Locking…' : 'Not locked';
+  $('lockColor').textContent = !tr ? 'Press A for a tracking preview'
+    : locked ? (found ? 'Stays with them until you change it' : crossing ? 'Holding while someone crosses' : 'Waiting for them to come back')
+    : found ? 'Following the person in red' : 'No speaker yet';
 }
 
 /* ================= pop-up camera =================
