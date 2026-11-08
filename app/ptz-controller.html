@@ -276,6 +276,10 @@ input[type=range]{width:100%;accent-color:var(--amber)}
 .note.bridge{border-left-color:var(--amber)}
 fieldset{border:1px solid var(--line-soft);border-radius:8px;padding:10px 12px 4px;margin:4px 0 12px}
 legend{font-size:13px;color:var(--muted);padding:0 6px}
+.iobox{border-top:1px solid var(--line-soft);margin-top:16px;padding-top:12px}
+.iobox h3{font-size:14px;margin:0 0 6px}
+.iobox .hint.err{color:var(--tally)}.iobox .hint.ok{color:var(--ready)}
+#setupPanel.drop{outline:2px dashed var(--op2);outline-offset:-6px}
 .tpl label.f{margin-bottom:8px}
 .tpl input{font-family:var(--mono);font-size:12.5px}
 .empty{color:var(--muted);font-size:14px;margin-bottom:12px}
@@ -634,13 +638,24 @@ h2{font-size:16px;margin:0}
       <label class="check"><input type="checkbox" id="fPopup"> Pop-up camera: opens with the Xbox button, not in the camera list</label>
       <label class="check"><input type="checkbox" id="fInvPan"> Reverse pan on this camera</label>
       <label class="check"><input type="checkbox" id="fInvTilt"> Reverse tilt on this camera</label>
-      <p class="hint" style="margin:0 0 6px">These change the controller only; auto-tracking isn\u2019t affected by them (it finds the right direction itself). Ceiling-mounted camera? Most reverse their own controls when you turn on their Image Flip setting; if yours doesn\u2019t, tick both.</p>
+      <p class="hint" style="margin:0 0 6px">These change the controller only; auto-tracking isn’t affected by them (it finds the right direction itself). Ceiling-mounted camera? Most reverse their own controls when you turn on their Image Flip setting; if yours doesn’t, tick both.</p>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" type="submit" id="saveCamBtn">Save camera</button>
         <button class="btn" type="button" id="newCamBtn">New camera</button>
         <button class="btn danger" type="button" id="delCamBtn">Delete</button>
       </div>
     </form>
+    <div class="iobox" id="camIo">
+      <h3>Set up cameras from a JSON file</h3>
+      <p class="hint" style="margin:0 0 8px">Load a camera file saved from PTZ Pad, or one you wrote by hand. A camera with the same name as one you have is updated; the rest are added. You can also drop the file anywhere on this panel.</p>
+      <label class="check"><input type="checkbox" id="ioReplace"> Replace all my cameras with the ones in the file</label>
+      <div class="row" style="margin-top:8px">
+        <button class="btn" type="button" id="ioLoad">Load JSON file…</button>
+        <button class="btn" type="button" id="ioSave">Save my cameras as JSON</button>
+        <input type="file" id="ioFile" accept=".json,application/json" hidden>
+      </div>
+      <p class="hint" id="ioMsg" aria-live="polite">The saved file includes any camera passwords you entered, so keep it private.</p>
+    </div>
   </div>
 
   <div class="panel" id="padPanel">
@@ -783,7 +798,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.12.0'; // keep in step with package.json "version"
+const APP_VERSION = '1.13.0'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -3133,6 +3148,168 @@ $('delCamBtn').onclick = () => {
   persist(); renderCams(); renderTarget(); renderTracking(); loadForm();
   log(`Deleted ${c.name}`);
 };
+
+/* ================= camera files (JSON) =================
+   Set up many cameras at once from a JSON file, and save them for another computer.
+   Accepted shapes: a file saved by PTZ Pad ({ "cams": [...] }, extra keys such as
+   "settings" are ignored), { "cameras": [...] }, a bare array of cameras, or one camera.
+   Cameras are matched by name: a camera with the same name is updated in place (it keeps
+   its id, so controller 2 and the selection stay on it); others are added. */
+const CAM_FILE_FORMAT = 'ptz-pad-cameras';
+const PROTO_ALIASES = { visca: 'visca-sony', 'visca-ip': 'visca-sony', 'visca-over-ip': 'visca-sony', sony: 'visca-sony',
+  'visca-raw': 'visca-udp', ptzoptics: 'http-ptzoptics', http: 'http-ptzoptics', 'http-cgi': 'http-ptzoptics', vapix: 'axis', aw: 'panasonic', webcam: 'usb', uvc: 'usb' };
+const camKey = (name) => String(name || '').trim().toLowerCase();
+function protoOf(v) {
+  const s = String(v ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (PROTOCOLS[s]) return s;
+  if (PROTO_ALIASES[s]) return PROTO_ALIASES[s];
+  const byLabel = Object.keys(PROTOCOLS).find((k) => PROTOCOLS[k].label.toLowerCase() === String(v ?? '').trim().toLowerCase());
+  return byLabel || null;
+}
+function camsInFile(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    if (Array.isArray(data.cams)) return data.cams;
+    if (Array.isArray(data.cameras)) return data.cameras;
+    if (data.name != null || data.protocol != null) return [data];
+  }
+  return null;
+}
+// Checks one camera from a file and fills in what's missing. Returns { cam, problems, warnings }.
+function cleanCam(raw, i) {
+  const where = `Camera ${i + 1} in the file`;
+  const problems = [], warnings = [];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { problems: [`${where} isn’t a camera (expected { "name": …, "protocol": … }).`], warnings };
+  const name = typeof raw.name === 'string' || typeof raw.name === 'number' ? String(raw.name).trim() : '';
+  const label = name ? `“${name}”` : where;
+  if (!name) problems.push(`${where} has no "name".`);
+  const protocol = protoOf(raw.protocol ?? 'visca-sony');
+  if (!protocol) problems.push(`${label}: "protocol" ${JSON.stringify(raw.protocol)} isn’t one PTZ Pad knows. Use one of: ${Object.keys(PROTOCOLS).join(', ')}.`);
+  const cam = {};
+  for (const [k, v] of Object.entries(raw)) if (!k.startsWith('_') && k !== 'id') cam[k] = v; // keep fields this version doesn't know yet
+  const str = (v) => (v == null ? '' : String(v).trim());
+  const bool = (v) => v === true || v === 1 || /^(true|yes|on|1)$/i.test(String(v ?? ''));
+  Object.assign(cam, {
+    name, protocol: protocol || 'visca-sony',
+    ip: str(raw.ip ?? raw.host), ndiSource: str(raw.ndiSource), trackSource: str(raw.trackSource), trackUrl: str(raw.trackUrl),
+    route: raw.route === 'bridge' ? 'bridge' : 'direct', user: str(raw.user), pass: raw.pass == null ? '' : String(raw.pass),
+    usbDevice: str(raw.usbDevice), usbLabel: str(raw.usbLabel), trackUsb: str(raw.trackUsb), trackUsbLabel: str(raw.trackUsbLabel),
+    trackUdp: bool(raw.trackUdp), popup: bool(raw.popup), invertPan: bool(raw.invertPan), invertTilt: bool(raw.invertTilt),
+  });
+  const P = PROTOCOLS[cam.protocol];
+  const port = raw.port == null || raw.port === '' ? null : Number(raw.port);
+  if (port != null && !(Number.isInteger(port) && port >= 1 && port <= 65535)) problems.push(`${label}: "port" must be a number from 1 to 65535.`);
+  cam.port = port || P.port;
+  const tc = raw.tcInput == null || raw.tcInput === '' ? null : Number(raw.tcInput);
+  if (tc != null && !(Number.isInteger(tc) && tc >= 0 && tc <= 32)) problems.push(`${label}: "tcInput" must be a TriCaster input from 1 to 32 (or 0 for none).`);
+  const n = camNum(cam);
+  cam.tcInput = tc ?? (n && n <= 32 ? n : 0);
+  const base = raw.presetBase == null || raw.presetBase === '' ? null : Number(raw.presetBase);
+  if (base != null && base !== 0 && base !== 1) problems.push(`${label}: "presetBase" must be 0 or 1.`);
+  cam.presetBase = base ?? P.base ?? 1;
+  if (!['ndi', 'stream', 'usb'].includes(raw.trackKind)) cam.trackKind = cam.trackUrl ? 'stream' : cam.trackUsb ? 'usb' : 'ndi';
+  const tpl = raw.tpl && typeof raw.tpl === 'object' ? raw.tpl : {};
+  cam.tpl = Object.fromEntries(TPL_FIELDS.map(([k]) => [k, str(tpl[k])]));
+  for (const k of ['aim', 'trackDir']) if (cam[k] != null && (typeof cam[k] !== 'object' || Array.isArray(cam[k]))) delete cam[k];
+  if (['visca', 'http'].includes(P.kind) && !cam.ip) warnings.push(`${label} has no IP address yet.`);
+  if (P.kind === 'ndi' && !cam.ndiSource) warnings.push(`${label} has no NDI source yet.`);
+  return { cam, problems, warnings };
+}
+function ioMsg(text, cls = '') { const m = $('ioMsg'); m.textContent = text; m.className = 'hint' + (cls ? ' ' + cls : ''); }
+function stopCamFully(c) {
+  stopTracking(c, false);
+  usbClose(c.id);
+  stopAll(c);
+  resetChannels(c);
+}
+async function importCamFile(file) {
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch (e) { ioMsg(`${file.name} isn’t valid JSON: ${e.message}`, 'err'); log(`Couldn’t read ${file.name}: it isn’t valid JSON.`, 'err'); return; }
+  const list = camsInFile(data);
+  if (!list || !list.length) { ioMsg(`${file.name} has no cameras in it. Expected a "cams" list, a "cameras" list, or an array of cameras.`, 'err'); return; }
+  const checked = list.map(cleanCam);
+  const problems = checked.flatMap((r) => r.problems), warnings = checked.flatMap((r) => r.warnings);
+  const seen = new Set();
+  for (const { cam } of checked) {
+    if (!cam || !cam.name) continue;
+    if (seen.has(camKey(cam.name))) problems.push(`Two cameras in the file are named “${cam.name}”. Names must be different.`);
+    seen.add(camKey(cam.name));
+  }
+  if (problems.length) {
+    ioMsg(`Nothing was changed. ${problems.length === 1 ? 'Fix this' : `Fix these ${problems.length} things`} in ${file.name}: ${problems.slice(0, 4).join(' ')}${problems.length > 4 ? ` (and ${problems.length - 4} more; see the log)` : ''}`, 'err');
+    problems.forEach((p) => log(p, 'err'));
+    return;
+  }
+  const incoming = checked.map((r) => r.cam);
+  const replace = $('ioReplace').checked;
+  const mine = new Map(state.cams.map((c) => [camKey(c.name), c]));
+  const updated = incoming.filter((c) => mine.has(camKey(c.name)));
+  const added = incoming.filter((c) => !mine.has(camKey(c.name)));
+  const removed = replace ? state.cams.filter((c) => !seen.has(camKey(c.name))) : [];
+  const summary = [added.length && `add ${added.length}`, updated.length && `update ${updated.length}`, removed.length && `remove ${removed.length}`].filter(Boolean).join(', ');
+  if (!confirm(`Load ${incoming.length} camera${incoming.length === 1 ? '' : 's'} from ${file.name}?\n\nThis will ${summary}.${removed.length ? `\nRemoved: ${removed.map((c) => c.name).join(', ')}` : ''}\n\nCameras being changed stop moving and tracking while they’re updated.`)) return;
+
+  for (const c of [...updated.map((u) => mine.get(camKey(u.name))), ...removed]) stopCamFully(c);
+  for (const u of updated) {
+    const c = mine.get(camKey(u.name));
+    for (const k of Object.keys(c)) if (!k.startsWith('_') && k !== 'id') delete c[k];
+    Object.assign(c, u);
+  }
+  const used = new Set(state.cams.map((c) => c.id));
+  for (const a of added) { let id; do id = uid(); while (used.has(id)); used.add(id); a.id = id; }
+  state.cams = [...state.cams.filter((c) => !removed.includes(c)), ...added];
+  // Only one pop-up camera: the first one keeps it.
+  const pops = state.cams.filter((c) => c.popup);
+  if (pops.length > 1) { pops.slice(1).forEach((c) => { c.popup = false; }); warnings.push(`Only one camera can be the pop-up camera; ${pops[0].name} is, the others are in the camera list.`); }
+  sortCams();
+  if (!state.cams.some((c) => c.id === state.activeId && !c.popup)) state.activeId = stripCams()[0]?.id || null;
+  if (state.settings.op2.camId && !state.cams.some((c) => c.id === state.settings.op2.camId)) state.settings.op2.camId = null;
+  editingId = state.activeId;
+  persist(); renderCams(); renderTarget(); renderTracking(); loadForm();
+  if (state.activeId) setTimeout(camShown, 0);
+  const done = `Loaded ${file.name}: ${[added.length && `${added.length} added`, updated.length && `${updated.length} updated`, removed.length && `${removed.length} removed`].filter(Boolean).join(', ')}.`;
+  ioMsg(done + (warnings.length ? ` To finish: ${warnings.join(' ')}` : ''), warnings.length ? '' : 'ok');
+  log(done, 'ok');
+  warnings.forEach((w) => log(w));
+  if (state.cams.some((c) => PROTOCOLS[c.protocol].kind !== 'http' || c.route === 'bridge')) checkBridge();
+}
+async function exportCamFile() {
+  if (!state.cams.length) { ioMsg('There are no cameras to save yet.', 'err'); return; }
+  const cams = state.cams.map((c) => Object.fromEntries(Object.entries(c).filter(([k]) => !k.startsWith('_'))));
+  const body = { format: CAM_FILE_FORMAT, formatVersion: 1, app: 'PTZ Pad', appVersion: APP_VERSION, savedAt: new Date().toISOString(), cams };
+  const blob = new Blob([JSON.stringify(body, null, 2) + '\n'], { type: 'application/json' });
+  const filename = `ptz-pad-cameras-${new Date().toISOString().slice(0, 10)}.json`;
+  if (HOSTED) {
+    const downloads = await window.claude.use('downloads').catch(() => null);
+    if (!downloads) { ioMsg('Saving files isn’t available in this view. Use the desktop app or the web version.', 'err'); return; }
+    try { await downloads.save({ filename, data: blob }); }
+    catch (e) { if (e && e.code === 'declined') return; ioMsg(`Couldn’t save the file: ${(e && e.message) || 'unknown problem'}`, 'err'); return; }
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  ioMsg(`Saved ${cams.length} camera${cams.length === 1 ? '' : 's'} as ${filename}. It includes any camera passwords, so keep it private.`, 'ok');
+  log(`Saved ${cams.length} cameras to ${filename}`, 'ok');
+}
+$('ioLoad').onclick = () => { $('ioFile').value = ''; $('ioFile').click(); };
+$('ioFile').onchange = () => importCamFile($('ioFile').files[0]);
+$('ioSave').onclick = exportCamFile;
+{
+  const panel = $('setupPanel');
+  const hasFile = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  panel.addEventListener('dragover', (e) => { if (!hasFile(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; panel.classList.add('drop'); });
+  panel.addEventListener('dragleave', (e) => { if (!panel.contains(e.relatedTarget)) panel.classList.remove('drop'); });
+  panel.addEventListener('drop', (e) => {
+    if (!hasFile(e)) return;
+    e.preventDefault(); panel.classList.remove('drop');
+    const f = [...e.dataTransfer.files].find((x) => /\.json$/i.test(x.name) || x.type === 'application/json');
+    if (f) importCamFile(f); else ioMsg('Drop a .json camera file here.', 'err');
+  });
+}
 
 // The selected camera's picture: USB cameras open directly; picture-only cameras start a live view.
 function camShown() {
