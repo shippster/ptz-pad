@@ -3,6 +3,10 @@
 Each version's notes appear in the app's update notice and on the GitHub release.
 Write them for the people running the cameras: what changed and what they need to do.
 
+## 1.13.1 (2026-11-08)
+
+- **Loading a camera file asks on the panel.** Choose Load cameras or Cancel right under the buttons. This replaces the pop-up dialog, which the claude.ai version blocked.
+
 ## 1.13.0 (2026-11-08)
 
 - **Set up cameras from a JSON file.** In Add a camera, choose Load JSON file… (or drop the file on the panel) to add or update many cameras at once. A camera with the same name as one you have is updated; the rest are added. Tick Replace all my cameras to swap in the file's list instead.

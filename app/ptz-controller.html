@@ -654,6 +654,10 @@ h2{font-size:16px;margin:0}
         <button class="btn" type="button" id="ioSave">Save my cameras as JSON</button>
         <input type="file" id="ioFile" accept=".json,application/json" hidden>
       </div>
+      <div class="note" id="ioAsk" hidden style="margin:10px 0 0">
+        <p id="ioAskText" style="margin:0 0 8px;white-space:pre-line"></p>
+        <div class="row"><button class="btn primary" type="button" id="ioYes">Load cameras</button><button class="btn" type="button" id="ioNo">Cancel</button></div>
+      </div>
       <p class="hint" id="ioMsg" aria-live="polite">The saved file includes any camera passwords you entered, so keep it private.</p>
     </div>
   </div>
@@ -798,7 +802,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.13.0'; // keep in step with package.json "version"
+const APP_VERSION = '1.13.1'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -3222,8 +3226,10 @@ function stopCamFully(c) {
   stopAll(c);
   resetChannels(c);
 }
+const IO_ASK = { cancel: null };
 async function importCamFile(file) {
   if (!file) return;
+  if (IO_ASK.cancel) IO_ASK.cancel(); // a newer file replaces a question still open
   let data;
   try { data = JSON.parse(await file.text()); }
   catch (e) { ioMsg(`${file.name} isn’t valid JSON: ${e.message}`, 'err'); log(`Couldn’t read ${file.name}: it isn’t valid JSON.`, 'err'); return; }
@@ -3249,7 +3255,13 @@ async function importCamFile(file) {
   const added = incoming.filter((c) => !mine.has(camKey(c.name)));
   const removed = replace ? state.cams.filter((c) => !seen.has(camKey(c.name))) : [];
   const summary = [added.length && `add ${added.length}`, updated.length && `update ${updated.length}`, removed.length && `remove ${removed.length}`].filter(Boolean).join(', ');
-  if (!confirm(`Load ${incoming.length} camera${incoming.length === 1 ? '' : 's'} from ${file.name}?\n\nThis will ${summary}.${removed.length ? `\nRemoved: ${removed.map((c) => c.name).join(', ')}` : ''}\n\nCameras being changed stop moving and tracking while they’re updated.`)) return;
+  // Ask on the page (pop-up dialogs are blocked in some views and would interrupt a show).
+  ioMsg('');
+  $('ioAskText').textContent = `Load ${incoming.length} camera${incoming.length === 1 ? '' : 's'} from ${file.name}? This will ${summary}.${removed.length ? `\nRemoved: ${removed.map((c) => c.name).join(', ')}` : ''}\nCameras being changed stop moving and tracking while they’re updated.`;
+  $('ioAsk').hidden = false;
+  const ok = await new Promise((done) => { $('ioYes').onclick = () => done(true); $('ioNo').onclick = () => done(false); IO_ASK.cancel = () => done(false); });
+  $('ioAsk').hidden = true; IO_ASK.cancel = null;
+  if (!ok) { ioMsg(`Didn’t load ${file.name}. Nothing changed.`); return; }
 
   for (const c of [...updated.map((u) => mine.get(camKey(u.name))), ...removed]) stopCamFully(c);
   for (const u of updated) {
