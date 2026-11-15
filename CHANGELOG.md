@@ -3,6 +3,13 @@
 Each version's notes appear in the app's update notice and on the GitHub release.
 Write them for the people running the cameras: what changed and what they need to do.
 
+## 1.17.0 (2026-11-15)
+
+- **Updates install inside the app.** When a new version is out, click **Update now** in the update notice. PTZ Pad downloads it right there with a progress bar, then installs it and reopens by itself. No GitHub page, no installer to run. It only starts when you click, so it never restarts during a show. Works with the Windows installer and the Linux app. The Windows portable copy and the Mac app keep the Download button for now (macOS only allows apps to update themselves once they're code-signed).
+- **This one last update is by hand.** Your current copy can't update itself yet, so install 1.17.0 from the download one more time. Every update after this happens inside the app.
+- **Tracking at 20 frames a second.** Auto-tracking now looks at 20 frames a second (it was 10 for RTSP and SRT streams), so the lock holds better when people move quickly or cross. NDI and USB cameras use the same setting. Change it under Feel and connection, Auto-tracking, **Tracking frame rate** (10, 15, 20 or 30). Below it, PTZ Pad shows the rate this computer really manages, and the command log says so if it can't keep up.
+- **Same timing at any frame rate.** The speaker-lost wait is now set in seconds (**Time without the speaker before choosing someone else**), and the crossing hold and search area keep the same timing whatever frame rate you choose.
+
 ## 1.16.0 (2026-11-15)
 
 - **The lock holds much better.** Two common causes of lost locks are fixed:

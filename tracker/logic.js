@@ -246,7 +246,9 @@ function updateOthers(state, people, chosen, now) {
  */
 export function pick(state, people, now = performance.now()) {
   people = dropFragments(people);
-  if (state.target && (state.misses || 0) <= 10) people = people.filter((p) => !isLeftover(p, state.target));
+  // Counts below were tuned at 15 detections a second; k keeps them the same in seconds at other rates.
+  const k = Math.max(0.5, Math.min(2.5, ((state.cfg && state.cfg.fps) || 15) / 15));
+  if (state.target && (state.misses || 0) <= 10 * k) people = people.filter((p) => !isLeftover(p, state.target));
   const cfg = state.cfg || {};
   const missMax = Math.max(1, cfg.missFrames || 10);
   const holdMin = cfg.holdMatch || 0.6;
@@ -277,10 +279,10 @@ export function pick(state, people, now = performance.now()) {
     const shift = pred.x - t.x;
     const predBox = t.box ? [t.box[0] + shift, t.box[1], t.box[2] + shift, t.box[3]] : null;
     const misses = state.misses || 0;
-    const reach = 0.1 + Math.min(0.35, misses * 0.02); // look wider the longer they're gone
+    const reach = 0.1 + Math.min(0.35, (misses / k) * 0.02); // look wider the longer they're gone
     // Locked: they're only picked back up close to where they were lost (the search area grows
     // slowly), or anywhere once they've been gone a while and their build clearly matches.
-    const heldReach = 0.1 + Math.min(0.2, misses * 0.01);
+    const heldReach = 0.1 + Math.min(0.2, (misses / k) * 0.01);
     const learned = state.model && state.model.n >= 20;
     const others = (state.others || []).filter((o) => o.together && (o.apart || 0) >= 3);
     const near = people.filter((p) => dist(p, pred) < reach || (predBox && overlap(p.box, predBox) > 0.05));
@@ -316,7 +318,7 @@ export function pick(state, people, now = performance.now()) {
     }
     if (best) {
       // Two people about as likely (they're crossing): hold still rather than guess, for a moment.
-      if (crowded && second - bc < 0.35 && misses === 0 && (state.amb || 0) < AMB_MAX) {
+      if (crowded && second - bc < 0.35 && misses === 0 && (state.amb || 0) < AMB_MAX * k) {
         state.amb = (state.amb || 0) + 1;
         state.crossing = true;
         return null;

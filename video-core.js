@@ -53,8 +53,9 @@ function explain(tail, url) {
  * Starts decoding a stream. onFrame({w, h, data}) gets at most one frame each
  * time handle.want is true; frames in between are dropped so tracking never lags.
  */
-function videoStart({ url, maxWidth = 480, fps = 10, transport } = {}, onFrame) {
+function videoStart({ url, maxWidth = 480, fps = 20, transport } = {}, onFrame) {
   url = String(url || '').trim();
+  fps = Math.max(5, Math.min(30, Math.round(Number(fps) || 20))); // tracking frames per second
   if (!ALLOWED.test(url)) throw new Error('Enter a stream address starting with rtsp:// or srt://');
   const h = { want: true, frames: 0, lastFrameAt: 0, lastSentAt: 0, unsupported: null, error: '', stopped: false, proc: null, retry: null, restarts: 0 };
 

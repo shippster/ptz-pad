@@ -92,6 +92,9 @@ p{margin:0}
 .update-title b{font:600 19px/1.15 var(--cond)}
 .update-title span{font-size:13px;color:var(--muted)}
 .update-acts{display:flex;gap:8px;flex-wrap:wrap}
+.update-prog{flex:1 1 100%;display:flex;align-items:center;gap:12px;margin-top:6px}
+.update-prog progress{flex:1;height:10px;accent-color:var(--amber)}
+.update-prog span{font:600 15px/1 var(--cond);font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
 .update-notes{margin-top:10px;max-height:240px;overflow:auto;font-size:14px}
 .update-notes h3{font:600 15px/1.2 var(--cond);margin:10px 0 4px;color:var(--muted)}
 .update-notes h3:first-child{margin-top:0}
@@ -428,6 +431,7 @@ h2{font-size:16px;margin:0}
       <button class="btn primary" type="button" id="updGo"></button>
       <button class="btn" type="button" id="updLater">Later</button>
     </div>
+    <div class="update-prog" id="updProg" hidden><progress id="updBar" max="100" value="0"></progress><span id="updPct">0%</span></div>
   </div>
   <div class="update-notes" id="updNotes"></div>
 </section>
@@ -746,11 +750,13 @@ h2{font-size:16px;margin:0}
       <legend>Auto-tracking</legend>
       <label class="f"><span>Shot</span><select id="tFraming"></select></label>
       <label class="check"><input type="checkbox" id="tZoom"> Zoom to keep the shot size</label>
+      <label class="f"><span>Tracking frame rate (more holds the lock better; needs a faster computer)</span><select id="tFps"><option value="10">10 frames a second</option><option value="15">15 frames a second</option><option value="20">20 frames a second</option><option value="30">30 frames a second</option></select></label>
+      <p class="hint" id="fpsNow" style="margin:-4px 0 10px"></p>
       <div class="set-row"><span>Tracking speed</span><output id="oTSpeed"></output><input type="range" id="tSpeed" min="0" max="1" step="0.05"></div>
       <div class="set-row"><span>Smoothness (higher eases in and out more gently)</span><output id="oTSmooth"></output><input type="range" id="tSmooth" min="0" max="1" step="0.05"></div>
       <div class="set-row"><span>Comfort zone (bigger moves less often)</span><output id="oTZone"></output><input type="range" id="tZone" min="0.04" max="0.25" step="0.01"></div>
       <label class="f"><span>Precision mode while tracking</span><select id="tPrec"><option value="rb">Slows tracking while RB is held</option><option value="always">Always track at precision speed</option><option value="off">Doesn’t affect tracking</option></select></label>
-      <div class="set-row"><span>Detections in a row without the speaker before choosing someone else (not while locked)</span><output id="oMiss"></output><input type="range" id="tMiss" min="3" max="60" step="1"></div>
+      <div class="set-row"><span>Time without the speaker before choosing someone else (not while locked)</span><output id="oMiss"></output><input type="range" id="tMiss" min="3" max="60" step="1"></div>
       <div class="set-row"><span>Lock body match: how closely someone must match the locked person’s build to be picked back up after they’re lost (higher is stricter)</span><output id="oHold"></output><input type="range" id="tHold" min="0.4" max="0.9" step="0.05"></div>
       <label class="f"><span>When the speaker walks out of the shot</span><select id="tSearch"><option value="zoom">Zoom out to find them, then pan their way</option><option value="pan">Pan the way they went</option><option value="off">Stay where it is</option></select></label>
       <label class="f"><span>When the speaker is lost</span><select id="tLost"><option value="hold">Stay where it is</option><option value="preset">Go to a preset</option></select></label>
@@ -825,7 +831,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.16.0'; // keep in step with package.json "version"
+const APP_VERSION = '1.17.0'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -1000,7 +1006,7 @@ const DRIVERS = { usb: USBD, mevo: NONE, video: NONE, 'visca-sony': VISCA, 'visc
 /* ================= state ================= */
 const DEFAULT_SETTINGS = { deadzone: 0.12, triggerDz: 0.08,
   tc: { on: false, ip: '', user: '', pass: '', follow: 'preview', protectDir: 'normal', protectOp: 'slow', mode: 'take', confirm: false, pick: true },
-  track: { v: 2, framing: 'medium', shots: {}, autoZoom: true, speed: 0.3, smooth: 0.6, zone: 0.1, lost: 'hold', search: 'zoom', lostPreset: 1, lostAfter: 5, tune: 0, precision: 'rb', missFrames: 10, holdMatch: 0.6,
+  track: { v: 2, framing: 'medium', shots: {}, fps: 20, autoZoom: true, speed: 0.3, smooth: 0.6, zone: 0.1, lost: 'hold', search: 'zoom', lostPreset: 1, lostAfter: 5, tune: 0, precision: 'rb', missFrames: 10, holdMatch: 0.6,
     pid: { manual: false, kp: 1.1, ki: 0, kd: 0.33, settle: 0.5, brake: 3, maxPan: 0.19, maxTilt: 0.15, accel: 0.36, delay: 300, easeIn: 1.2, easeOut: 1 } }, expo: 1.7, precision: 0.3, maxSpeed: 0.7, invertTilt: false, invertFocus: false, rumble: true, bridge: 'http://localhost:8787' };
 const state = { cams: [], activeId: null, settings: { ...DEFAULT_SETTINGS } };
 const STORE_KEY = 'ptzpad.v1';
@@ -1413,7 +1419,8 @@ function renderLive() {
 // Frames from a USB camera to the tracker (desktop app 1.7 and later).
 const pumpCanvas = document.createElement('canvas');
 const pumpCtx = pumpCanvas.getContext('2d', { willReadFrequently: true });
-setInterval(() => {
+function pumpFrames() { // paced by Tracking frame rate; first run after the page has loaded
+  setTimeout(pumpFrames, Math.round(1000 / trackFps()));
   if (!NATIVE || !NATIVE.track || !NATIVE.track.push) return;
   for (const [id, tr] of trackers) {
     if (!tr.local || tr.status !== 'running') continue;
@@ -1426,7 +1433,8 @@ setInterval(() => {
     pumpCtx.drawImage(u.video, 0, 0, w, h);
     NATIVE.track.push({ id, w, h, data: pumpCtx.getImageData(0, 0, w, h).data });
   }
-}, 80);
+}
+setTimeout(pumpFrames, 100);
 
 /* ================= continuous channels ================= */
 // Each camera keeps its own channel state, so a tracked camera can keep moving
@@ -2124,6 +2132,16 @@ const FRAMING = {
   medium: { headY: 0.30, scale: 0.15, label: 'Medium (waist up)' },
   close:  { headY: 0.36, scale: 0.28, label: 'Close (head and shoulders)' },
 };
+// Tracking frames per second: the setting, and what this computer really manages.
+function trackFps() { return clamp(Number(state.settings.track.fps) || 20, 5, 30); } // hoisted: the USB frame pump uses it at start
+function renderFps() {
+  const el = $('fpsNow'); if (!el) return;
+  const c = activeCam(), tr = c && trackers.get(c.id), live = tr && tr.status === 'running' && tr.rate > 0 && performance.now() - tr.rateAt < 2000;
+  el.textContent = live
+    ? `${c.name} is tracking at ${Math.round(tr.rate)} frames a second${tr.fpsWant && tr.rate < tr.fpsWant * 0.7 ? `, below the ${tr.fpsWant} set: this computer can\u2019t keep up. Try a lower rate, or close other apps.` : '.'}`
+    : 'A change applies the next time tracking starts on a camera.';
+  el.className = 'hint' + (live && tr.fpsWant && tr.rate < tr.fpsWant * 0.7 ? ' bad' : '');
+}
 const LOCK_WHY = {
   unseen: 'The pose model didn\u2019t find them near where they were (left the shot, hidden, or moved fast).',
   behind: 'Someone is in front of them.',
@@ -2508,7 +2526,8 @@ async function toggleTracking(view, camArg) {
     trackers.delete(cam.id); renderTracking(); renderCams();
     return log('This copy of PTZ Pad can only track NDI video. Replace it with the latest version for RTSP and SRT.', 'err');
   }
-  const res = await NATIVE.track.start({ id: cam.id, ...vid, libPath: state.settings.ndiLib || '' });
+  tr.fpsWant = trackFps(); tr.rate = 0; tr.rateAt = 0; tr.slowSince = 0; tr.slowWarned = false;
+  const res = await NATIVE.track.start({ id: cam.id, ...vid, libPath: state.settings.ndiLib || '', fps: tr.fpsWant });
   if (trackers.get(cam.id) !== tr) { NATIVE.track.stop(cam.id); return; } // turned off while starting
   if (!res.ok) {
     trackers.delete(cam.id);
@@ -2652,9 +2671,22 @@ if (canTrack()) NATIVE.track.onUpdate((r) => {
     if (tr.lastX != null && now > tr.lastAt) tr.vx = clamp(tr.vx * 0.8 + ((r.x - tr.lastX) / ((now - tr.lastAt) / 1000)) * 0.2, -1, 1);
     tr.lastX = r.x; tr.lastAt = now;
   }
+  // How many frames a second the tracker really gets through (smoothed over about two seconds).
+  if (r.w) { // a real frame (errors and notices come this way too)
+    if (tr.rateAt) { const gap = now - tr.rateAt; if (gap > 0 && gap < 2000) tr.rate = tr.rate ? tr.rate + (1000 / gap - tr.rate) * 0.08 : 1000 / gap; }
+    tr.rateAt = now;
+  }
+  if (tr.fpsWant && tr.rate && tr.rate < tr.fpsWant * 0.7) {
+    tr.slowSince = tr.slowSince || now;
+    if (!tr.slowWarned && now - tr.slowSince > 10000) {
+      tr.slowWarned = true;
+      const cam = state.cams.find((c) => c.id === r.id);
+      log(`${cam ? cam.name : 'Camera'}: tracking at ${Math.round(tr.rate)} frames a second, below the ${tr.fpsWant} set. This computer can\u2019t keep up; lower Tracking frame rate in Feel and connection, or close other apps.`, 'err');
+    }
+  } else tr.slowSince = 0;
   // A lock that has been waiting half a second or more: say why in the command log, once,
   // and say when the speaker is picked back up, so lock breaks can be traced after a show.
-  if (r.locked && !r.found && (r.misses || 0) >= 5 && !tr.lossAt) {
+  if (r.locked && !r.found && (r.misses || 0) >= Math.max(3, Math.round(trackFps() / 2)) && !tr.lossAt) {
     tr.lossAt = now;
     const cam = state.cams.find((c) => c.id === r.id);
     log(`${cam ? cam.name : 'Camera'}: lock waiting for the speaker. ${LOCK_WHY[r.why] || LOCK_WHY.unsure}`);
@@ -3444,7 +3476,8 @@ function camShown() {
 const canHold = () => !!(NATIVE && NATIVE.track && NATIVE.track.hold);
 function sendTrackCfg(id) {
   if (!NATIVE || !NATIVE.track || !NATIVE.track.config) return;
-  const T = state.settings.track, cfg = { missFrames: T.missFrames, holdMatch: T.holdMatch };
+  // Wait without the speaker is set in tenths of a second; the tracker counts it in frames at the tracking rate.
+  const T = state.settings.track, cfg = { missFrames: Math.max(1, Math.round(T.missFrames * trackFps() / 10)), holdMatch: T.holdMatch, fps: trackFps() };
   for (const k of id ? [id] : [...trackers.keys()]) NATIVE.track.config(k, cfg);
 }
 /* A on the controller: auto-tracking in two steps.
@@ -3673,6 +3706,8 @@ for (const [id, key] of [['sInvTilt', 'invertTilt'], ['sInvFocus', 'invertFocus'
   for (let n = 1; n <= 8; n++) { const o = document.createElement('option'); o.value = n; o.textContent = n; $('tLostPreset').append(o); }
   $('tFraming').value = T.framing; $('tFraming').onchange = () => setShot($('tFraming').value);
   $('tZoom').checked = T.autoZoom; $('tZoom').onchange = () => { T.autoZoom = $('tZoom').checked; save(); renderShot(); };
+  $('tFps').value = String(trackFps()); $('tFps').onchange = () => { T.fps = Number($('tFps').value); save(); renderFps(); sendTrackCfg(); };
+  setInterval(renderFps, 1000); renderFps();
   for (const [k, f] of Object.entries(FRAMING)) {
     const b = document.createElement('button'); b.type = 'button'; b.dataset.shot = k; b.textContent = f.label.replace(/\s*\(.*\)$/, '');
     b.title = f.label; b.onclick = () => setShot(k); $('shotBtns').append(b);
@@ -3699,7 +3734,7 @@ for (const [id, key] of [['sInvTilt', 'invertTilt'], ['sInvFocus', 'invertFocus'
   $('tLost').value = T.lost; $('tLost').onchange = () => { T.lost = $('tLost').value; lostVis(); save(); }; lostVis();
   $('tLostPreset').value = T.lostPreset; $('tLostPreset').onchange = () => { T.lostPreset = Number($('tLostPreset').value); save(); };
   $('tLostAfter').value = T.lostAfter; $('tLostAfter').onchange = () => { T.lostAfter = clamp(Number($('tLostAfter').value) || 5, 1, 60); $('tLostAfter').value = T.lostAfter; save(); };
-  const cfgOut = () => { $('oMiss').textContent = T.missFrames; $('oHold').textContent = pct(T.holdMatch) + '%'; };
+  const cfgOut = () => { $('oMiss').textContent = `${(T.missFrames / 10).toFixed(1)} s`; $('oHold').textContent = pct(T.holdMatch) + '%'; };
   $('tMiss').value = T.missFrames; $('tHold').value = T.holdMatch; cfgOut();
   $('tMiss').oninput = () => { T.missFrames = Number($('tMiss').value); cfgOut(); save(); sendTrackCfg(); };
   $('tHold').oninput = () => { T.holdMatch = Number($('tHold').value); cfgOut(); save(); sendTrackCfg(); };
@@ -3969,12 +4004,14 @@ function showUpdate(mode) {
   const bar = $('updateBar');
   if (mode === 'available') {
     $('updTitle').textContent = `PTZ Pad ${feed.version} is available`;
-    $('updSub').textContent = UPDATE_BY_RELOAD
+    $('updSub').textContent = UPD.self
+      ? `You have ${APP_VERSION}. Update now downloads it right here and restarts PTZ Pad when it’s done. Do it when you’re off air; your cameras and settings stay.`
+      : UPDATE_BY_RELOAD
       ? `You have ${APP_VERSION}. Reload when you’re off air; your cameras and settings stay.`
       : HOSTED
         ? `This page is ${APP_VERSION}. Ask Claude to update this page, or download the desktop app.`
         : `You have ${APP_VERSION}. Download and install it when you’re off air; your cameras and settings stay.`;
-    $('updGo').textContent = UPDATE_BY_RELOAD ? 'Reload now' : 'Download';
+    $('updGo').textContent = UPD.self ? 'Update now' : UPDATE_BY_RELOAD ? 'Reload now' : 'Download';
     $('updGo').hidden = false;
     $('updNotes').innerHTML = notesBetween(feed, APP_VERSION, feed.version) || '<p>See the release page for details.</p>';
   } else {
@@ -3989,7 +4026,39 @@ function showUpdate(mode) {
   bar.hidden = false;
   $('updChip').hidden = true;
 }
+// The desktop app updates itself (Windows installer and Linux; app version 7 and later).
+if (NATIVE && NATIVE.update) {
+  NATIVE.update.can().then((r) => { UPD.self = !!(r && r.ok); if (UPD.mode === 'available' && !$('updateBar').hidden) showUpdate('available'); }).catch(() => {});
+  NATIVE.update.onProgress((p) => {
+    const v = Math.max(0, Math.min(100, Math.round(p.percent || 0)));
+    $('updBar').value = v; $('updPct').textContent = v + '%';
+  });
+}
+async function selfUpdate() {
+  const v = UPD.feed.version;
+  $('updGo').hidden = true; $('updLater').hidden = true; $('updChip').hidden = true;
+  $('updProg').hidden = false; $('updBar').value = 0; $('updPct').textContent = '0%'; $('updBar').removeAttribute('value');
+  $('updTitle').textContent = `Updating to PTZ Pad ${v}`;
+  $('updSub').textContent = 'Downloading. PTZ Pad restarts by itself when it\u2019s done.';
+  const r = await NATIVE.update.download();
+  if (!r || !r.ok) {
+    UPD.self = false; // this time, fall back to the download page
+    $('updProg').hidden = true; $('updGo').hidden = false; $('updLater').hidden = false;
+    $('updTitle').textContent = `PTZ Pad ${v} is available`;
+    $('updSub').textContent = `The update didn\u2019t download${r && r.error ? ` (${r.error})` : ''}. You can download it from the release page instead.`;
+    $('updGo').textContent = 'Download';
+    log(`Update to ${v} didn\u2019t download: ${(r && r.error) || 'no answer'}`, 'err');
+    return;
+  }
+  $('updBar').value = 100; $('updPct').textContent = '100%';
+  $('updTitle').textContent = `Installing PTZ Pad ${v}`;
+  $('updSub').textContent = 'Stopping the cameras and restarting PTZ Pad\u2026';
+  for (const c of state.cams) { try { stopAll(c); } catch (e) {} } // nothing keeps moving while the app restarts
+  persist();
+  setTimeout(() => NATIVE.update.install(), 700);
+}
 $('updGo').onclick = () => {
+  if (UPD.self && UPD.mode === 'available' && UPD.feed) { selfUpdate(); return; }
   if (UPDATE_BY_RELOAD) { location.reload(); return; }
   window.open((UPD.feed && UPD.feed.download) || 'https://github.com/shippster/ptz-pad/releases/latest', '_blank', 'noopener');
 };

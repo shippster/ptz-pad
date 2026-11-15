@@ -46,6 +46,49 @@ function createWindow() {
   win.on('closed', () => { win = null; app.quit(); });
 }
 
+/* ---------- updates inside the app ----------
+   The update notice's Update button downloads the new version here, with progress shown in
+   the notice, then installs it silently and reopens PTZ Pad. Nothing happens until it's
+   clicked, so a show is never interrupted. Works for the Windows installer and the Linux
+   AppImage. The Windows portable copy and the Mac app (not code-signed yet, which macOS
+   requires for updates) keep the Download button. */
+let autoUpdater = null;
+try { ({ autoUpdater } = require('electron-updater')); } catch (e) { /* not bundled: Download button */ }
+const canSelfUpdate = () => !!autoUpdater && app.isPackaged && (
+  (process.platform === 'win32' && !process.env.PORTABLE_EXECUTABLE_DIR) ||
+  (process.platform === 'linux' && !!process.env.APPIMAGE));
+if (autoUpdater) {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false; // only ever when the Update button is clicked
+  autoUpdater.logger = null;
+  autoUpdater.on('download-progress', (p) => {
+    if (win && !win.isDestroyed()) win.webContents.send('update:progress', { percent: p.percent, transferred: p.transferred, total: p.total, bytesPerSecond: p.bytesPerSecond });
+  });
+}
+const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); return false; };
+let updateBusy = false;
+ipcMain.handle('update:can', () => ({ ok: canSelfUpdate(), platform: process.platform }));
+ipcMain.handle('update:download', async () => {
+  if (!canSelfUpdate()) return { ok: false, error: 'This copy of PTZ Pad can\u2019t update itself.' };
+  if (updateBusy) return { ok: false, error: 'An update is already downloading.' };
+  updateBusy = true;
+  try {
+    const r = await autoUpdater.checkForUpdates();
+    const v = r && r.updateInfo && r.updateInfo.version;
+    if (!v || !newer(v, app.getVersion())) return { ok: false, error: 'No newer version found.' };
+    await autoUpdater.downloadUpdate();
+    return { ok: true, version: v };
+  } catch (e) {
+    return { ok: false, error: (e && e.message ? e.message.split('\n')[0] : 'The download didn\u2019t finish.') };
+  } finally { updateBusy = false; }
+});
+ipcMain.handle('update:install', () => {
+  if (!canSelfUpdate()) return { ok: false };
+  // Silent install, then PTZ Pad opens again on its own.
+  setImmediate(() => { shutdown(); autoUpdater.quitAndInstall(true, true); });
+  return { ok: true };
+});
+
 /* ---------- camera commands ---------- */
 ipcMain.handle('ptz:visca', (_e, args) => bridge.visca(args));
 ipcMain.handle('ptz:http', (_e, args) => bridge.http(args));
@@ -142,7 +185,7 @@ function stopTrack(id) {
   if (tracker && !tracker.isDestroyed()) tracker.webContents.send('track:stop', { id });
 }
 
-ipcMain.handle('track:start', async (_e, { id, source, url, transport, libPath, local } = {}) => {
+ipcMain.handle('track:start', async (_e, { id, source, url, transport, libPath, local, fps } = {}) => {
   try {
     if (!fs.existsSync(MODEL)) {
       return { ok: false, error: 'The auto-tracking model is missing. Run the Start PTZ Pad launcher again with internet on, then restart PTZ Pad.' };
@@ -153,7 +196,7 @@ ipcMain.handle('track:start', async (_e, { id, source, url, transport, libPath, 
       tracks.set(id, { h: freshFrameState(), args: { local: true }, kind: 'local', startedAt: Date.now(), warned: false, lastErr: '' });
       return { ok: true };
     }
-    const args = url ? { url, transport } : { source, libPath };
+    const args = url ? { url, transport, fps } : { source, libPath, fps };
     tracks.set(id, { h: freshFrameState(), args, kind: url ? 'stream' : 'ndi', startedAt: Date.now(), warned: false, lastErr: '' });
     const res = await new Promise((resolve) => {
       pendingStarts.set(id, resolve);

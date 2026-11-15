@@ -5,7 +5,7 @@
  * crashes, camera control and the controller keep working and the app
  * restarts this process. Started by main.js with Electron's utilityProcess.
  *
- * In:  {type:'start', id, source|url, transport, libPath}, {type:'want', id}, {type:'stop', id}
+ * In:  {type:'start', id, source|url, transport, libPath, fps}, {type:'want', id}, {type:'stop', id}
  * Out: {type:'started', id, ok, error}, {type:'frame', id, w, h, data}, {type:'status', id, ...}
  */
 const ndi = require('./ndi-core');
@@ -28,8 +28,8 @@ port.on('message', (e) => {
     try {
       const onFrame = (f) => port.postMessage({ type: 'frame', id: m.id, w: f.w, h: f.h, data: f.data });
       const h = m.url
-        ? video.videoStart({ url: m.url, transport: m.transport }, onFrame)
-        : ndi.videoStart({ source: m.source, libPath: m.libPath }, onFrame);
+        ? video.videoStart({ url: m.url, transport: m.transport, fps: m.fps }, onFrame)
+        : ndi.videoStart({ source: m.source, libPath: m.libPath, fps: m.fps }, onFrame);
       jobs.set(m.id, { h, stop: m.url ? video.videoStop : ndi.videoStop });
       port.postMessage({ type: 'started', id: m.id, ok: true });
     } catch (err) {

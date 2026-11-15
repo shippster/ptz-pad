@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 // The web app checks for window.ptzNative and, when present, sends every
 // camera command through the built-in bridge instead of a separate server.
 contextBridge.exposeInMainWorld('ptzNative', {
-  version: 6,
+  version: 7,
   visca: (args) => ipcRenderer.invoke('ptz:visca', args),
   http: (args) => ipcRenderer.invoke('ptz:http', args),
   ndi: (args) => ipcRenderer.invoke('ptz:ndi', args),
@@ -20,5 +20,12 @@ contextBridge.exposeInMainWorld('ptzNative', {
   },
   stream: {
     test: (args) => ipcRenderer.invoke('stream:test', args),
+  },
+  // Updates inside the app (version 7): download with progress, then install and reopen.
+  update: {
+    can: () => ipcRenderer.invoke('update:can'),
+    download: () => ipcRenderer.invoke('update:download'),
+    install: () => ipcRenderer.invoke('update:install'),
+    onProgress: (cb) => ipcRenderer.on('update:progress', (_e, p) => cb(p)),
   },
 });

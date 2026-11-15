@@ -273,8 +273,9 @@ const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
  * onFrame({w, h, data}) gets at most one frame each time handle.want is true;
  * frames arriving meanwhile are dropped so tracking never falls behind.
  */
-function videoStart({ source, libPath = '', maxWidth = 480 } = {}, onFrame) {
+function videoStart({ source, libPath = '', maxWidth = 480, fps = 20 } = {}, onFrame) {
   load(libPath);
+  const gap = 1000 / Math.max(5, Math.min(30, Number(fps) || 20)) - 4; // at most fps frames a second to the tracker
   if (!source) throw new NdiError('Choose the NDI video to track in this camera\u2019s settings.');
   const inst = fn.recvCreate({
     source_to_connect_to: { p_ndi_name: String(source), p_url_address: null },
@@ -293,7 +294,7 @@ function videoStart({ source, libPath = '', maxWidth = 480 } = {}, onFrame) {
       if (type !== 1) break; // 1 = video frame
       try {
         h.frames++; h.lastFrameAt = Date.now();
-        if (h.want) {
+        if (h.want && Date.now() - h.lastSentAt >= gap) {
           const fr = downscale(vf, maxWidth);
           if (fr && fr.unsupported) h.unsupported = fr.unsupported;
           else if (fr) { h.want = false; h.lastSentAt = Date.now(); onFrame(fr); }

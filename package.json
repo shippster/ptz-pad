@@ -1,7 +1,7 @@
 {
   "name": "ptz-pad",
   "productName": "PTZ Pad",
-  "version": "1.16.0",
+  "version": "1.17.0",
   "description": "Drive PTZ cameras with an Xbox controller. VISCA, NDI, PTZOptics, Panasonic, Axis and custom HTTP, with auto-tracking from NDI, RTSP or SRT video.",
   "main": "main.js",
   "license": "MIT",
@@ -74,11 +74,20 @@
     "asarUnpack": [
       "node_modules/koffi/**",
       "node_modules/ffmpeg-static/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "shippster",
+        "repo": "ptz-pad",
+        "releaseType": "release"
+      }
     ]
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.14",
-    "koffi": "^2.9.0"
+    "koffi": "^2.9.0",
+    "electron-updater": "^6.3.9"
   },
   "optionalDependencies": {
     "ffmpeg-static": "^5.2.0"
