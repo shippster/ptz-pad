@@ -3,6 +3,12 @@
 Each version's notes appear in the app's update notice and on the GitHub release.
 Write them for the people running the cameras: what changed and what they need to do.
 
+## 1.14.1 (2026-11-15)
+
+- **Talking with your hands no longer loses the speaker.** The pose model sometimes sees a second "person" around a speaker's moving arm or hand. PTZ Pad now recognizes it as part of the speaker, so the red box stays on them and the lock holds. The extra box around their hands is gone from the monitor too.
+- **Quicker recovery after a missed frame.** If the speaker drops out for a moment while gesturing, PTZ Pad picks them straight back up where it last saw them clearly, instead of waiting about a second.
+- Someone really standing just behind the speaker still counts as a separate person. Nothing to change in your settings.
+
 ## 1.14.0 (2026-11-08)
 
 - **Auto-tracking locks on a person, not a shirt colour.** Once locked, PTZ Pad stays with that one person until you change it: click someone else, press Unlock (L), or press A to go back to the preview. Someone in the same colours can no longer take over.

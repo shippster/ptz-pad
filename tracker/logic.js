@@ -33,7 +33,60 @@ export function summarize(lm, aspect = 16 / 9, world = null) {
   let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
   for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
   y0 = Math.max(0, y0 - (y1 - y0) * 0.08); // landmarks stop at the face: pad for the top of the head
-  return { x, headY, scale, box: [Math.max(0, x0), y0, Math.min(1, x1), Math.min(1, y1)], build: buildOf(lm, world) };
+  // A real face: a confident nose with at least one eye. Where the head is, and where the arms and
+  // hands are, so a "person" the model finds on someone's moving hand can be told from a real one.
+  const eye = seen(lm[L_EYE]) ? lm[L_EYE] : seen(lm[R_EYE]) ? lm[R_EYE] : null;
+  const face = sure(nose) && !!eye;
+  const head = seen(nose) ? { x: nose.x, y: nose.y } : eye ? { x: eye.x, y: eye.y } : { x, y: headY };
+  const hands = [];
+  for (let i = L_EL; i <= 22 && i < lm.length; i++) if (seen(lm[i])) hands.push({ x: lm[i].x, y: lm[i].y });
+  return { x, headY, scale, box: [Math.max(0, x0), y0, Math.min(1, x1), Math.min(1, y1)], build: buildOf(lm, world), face, head, hands };
+}
+
+/* ---------- one person, not two ----------
+ * When someone talks with their hands, the pose model sometimes reports a second "person"
+ * around the moving arm: no real face (or a "face" found on the hand), about the speaker's
+ * size, sitting inside the speaker's own outline. It isn't anyone. Left in, it would be
+ * followed as someone else standing beside the speaker, and anyone seen beside the speaker
+ * can never be the speaker, so the real speaker could be taken for it and the lock lost.
+ * A detection is part of a bigger one when most of its box lies inside the bigger box and its
+ * head isn't a real face of its own: no face, or one sitting on the other person's hand, arm
+ * or face. Someone really standing behind the speaker shows their own face elsewhere, so
+ * they're kept. */
+const area = (b) => Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+function inside(a, b, pad = 0.03) { // how much of box a lies within box b (0..1)
+  const w = Math.min(a[2], b[2] + pad) - Math.max(a[0], b[0] - pad), h = Math.min(a[3], b[3] + pad) - Math.max(a[1], b[1] - pad);
+  const aa = area(a);
+  return w > 0 && h > 0 && aa > 0 ? (w * h) / aa : 0;
+}
+const near = (a, b, r) => !!a && !!b && Math.hypot(a.x - b.x, a.y - b.y) < r;
+export function isFragment(d, p) {
+  if (!d.box || !p.box || area(d.box) >= area(p.box)) return false;
+  if (inside(d.box, p.box) < 0.6) return false;
+  const h = d.head || { x: d.x, y: d.headY };
+  if (!d.face) return true; // nothing of its own: an arm or hand
+  if (near(h, p.head || { x: p.x, y: p.headY }, 0.025)) return true; // the same face, counted twice
+  return (p.hands || []).some((q) => near(h, q, 0.07)); // a "face" on their hand or arm
+}
+/* The model can also miss the speaker for a frame and report only the "person" on their hand.
+ * Just after the speaker was seen, a detection inside their last outline whose head is away from
+ * the speaker's head and isn't a real face (or is one on their hand) is their arm, not someone new.
+ * The speaker themselves keeps their head where it was, so they're never dropped by this, even
+ * with their back turned. */
+export function isLeftover(d, t) {
+  if (!d.box || !t || !t.box || inside(d.box, t.box, 0.08) < 0.6) return false; // room for the arm to move on
+  const h = d.head || { x: d.x, y: d.headY }, th = t.head || { x: t.x, y: t.headY };
+  // Where their head was, at the same height: them (a hand at the chin sits lower than the face).
+  if (Math.abs(h.x - th.x) < 0.06 && Math.abs(h.y - th.y) < 0.035) return false;
+  return !d.face || (t.hands || []).some((q) => near(h, q, 0.07));
+}
+/** Drops the "people" that are really part of someone bigger (a moving arm or hand). */
+export function dropFragments(people) {
+  if (!people || people.length < 2) return people || [];
+  const bySize = people.slice().sort((a, b) => area(b.box || [0, 0, 0, 0]) - area(a.box || [0, 0, 0, 0]));
+  const kept = [];
+  for (const d of bySize) if (!kept.some((p) => isFragment(d, p))) kept.push(d);
+  return people.filter((p) => kept.includes(p)); // in the model's order
 }
 
 const dist = (a, b) => Math.hypot(a.x - b.x, (a.headY - b.headY) * 0.6);
@@ -114,10 +167,14 @@ function follow(state, p, now, learn) {
   const t = state.target;
   const vx = t && t.at && now > t.at ? (p.x - t.x) / ((now - t.at) / 1000) : 0;
   state.target = {
-    x: p.x, headY: p.headY, scale: p.scale, box: p.box, at: now,
+    x: p.x, headY: p.headY, scale: p.scale, box: p.box, head: p.head, hands: p.hands, at: now,
     vx: t ? (t.vx || 0) * 0.7 + Math.max(-1, Math.min(1, vx)) * 0.3 : 0,
   };
   if (learn) state.model = learnBuild(state.model, p.build);
+  // Where they were last seen for certain: a real face and a body to measure. If something weaker
+  // (a "person" found on their hand) is followed for a moment, the speaker can take the red box
+  // straight back from here instead of being treated as someone new.
+  if (p.face && p.build) state.anchor = { x: p.x, headY: p.headY, at: now };
   state.misses = 0;
   state.amb = 0;
   return p;
@@ -181,6 +238,8 @@ function updateOthers(state, people, chosen, now) {
  * for missFrames detections in a row; only then is someone else chosen.
  */
 export function pick(state, people, now = performance.now()) {
+  people = dropFragments(people);
+  if (state.target && (state.misses || 0) <= 10) people = people.filter((p) => !isLeftover(p, state.target));
   const cfg = state.cfg || {};
   const missMax = Math.max(1, cfg.missFrames || 10);
   const holdMin = cfg.holdMatch || 0.6;
@@ -200,7 +259,7 @@ export function pick(state, people, now = performance.now()) {
       // The person who was followed becomes one of the others.
       if (state.target) (state.others = state.others || []).push({ ...state.target, misses: 0, together: true });
       state.others = (state.others || []).filter((o) => !(o.box && overlap(o.box, hit.box) > 0.5));
-      state.held = false; state.target = null; state.model = null;
+      state.held = false; state.target = null; state.model = null; state.anchor = null;
       return done(follow(state, hit, now, true));
     }
   }
@@ -220,10 +279,13 @@ export function pick(state, people, now = performance.now()) {
     const near = people.filter((p) => dist(p, pred) < reach || (predBox && overlap(p.box, predBox) > 0.05));
     const crowded = near.length > 1 || others.some((o) => o.misses === 0 && dist(o, pred) < 0.15);
     let best = null, bc = Infinity, second = Infinity;
+    const anchor = state.anchor && now - state.anchor.at < 2000 ? state.anchor : null;
     for (const p of people) {
-      const d = dist(p, pred);
       const m = buildMatch(state.model, p.build);
       const like = m ? m.score : null;
+      let d = dist(p, pred);
+      // Back where they were last seen for certain, with a real face and their build: them.
+      if (anchor && p.face && like != null && like >= holdMin) d = Math.min(d, dist(p, anchor));
       const size = sizeGap(t, p);
       const strong = learned && m && m.parts >= 4 && like >= Math.max(0.85, holdMin + 0.2);
       // Someone else's track fits this detection about as well: it's them, not the speaker.
@@ -258,7 +320,7 @@ export function pick(state, people, now = performance.now()) {
     if (behind) state.crossing = true;
     // Only choose someone else after missFrames detections in a row without the speaker (three
     // times as long while they're hidden behind someone), and never while locked.
-    if (!held && state.misses >= missMax * (behind ? 3 : 1)) { state.target = null; state.model = null; }
+    if (!held && state.misses >= missMax * (behind ? 3 : 1)) { state.target = null; state.model = null; state.anchor = null; }
     return done(null);
   }
   // Nobody followed yet: take the person nearest the center of the shot.
@@ -266,7 +328,7 @@ export function pick(state, people, now = performance.now()) {
   const score = (p) => -Math.hypot(p.x - 0.5, (p.headY - 0.4) * 0.5) + p.scale * 0.05;
   const best = people.slice().sort((a, b) => score(b) - score(a))[0];
   if (!best) return done(null);
-  state.model = null;
+  state.model = null; state.anchor = null;
   state.others = [];
   return done(follow(state, best, now, true));
 }

@@ -804,7 +804,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.14.0'; // keep in step with package.json "version"
+const APP_VERSION = '1.14.1'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).

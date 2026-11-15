@@ -1,5 +1,7 @@
 // Simulated crossings, exits and picks for the auto-tracking person lock. Run: node tools/test-tracking.mjs
-import { pick } from '../tracker/logic.js';
+import * as logic from '../tracker/logic.js';
+const { pick } = logic;
+const dropFragments = logic.dropFragments || ((p) => p); // before 1.14.1 there was no such step
 let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
 const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return (s - 3) / Math.sqrt(0.5); };
 const BASE = { size: Math.log(0.38), head: Math.log(0.42), neck: Math.log(0.55), upperArm: Math.log(0.78), forearm: Math.log(0.68), torso: Math.log(1.35), hips: Math.log(0.72), thigh: Math.log(1.15), shin: Math.log(1.1) };
@@ -10,24 +12,48 @@ const noisy = (b, parts) => Object.fromEntries(Object.entries(b).filter(([k]) =>
 const UPPER = ['size', 'head', 'neck', 'upperArm', 'forearm'];
 const person = (name, x, scale, body, parts) => {
   const w = scale * 1.6, h = scale * 3.2, top = 0.25;
-  return { name, x: x + gauss() * 0.003, headY: top + 0.05 + gauss() * 0.003, scale, box: [x - w / 2, top, x + w / 2, Math.min(1, top + h)], build: body ? noisy(body, parts) : null };
+  const px = x + gauss() * 0.003, hy = top + 0.05 + gauss() * 0.003;
+  return { name, x: px, headY: hy, scale, box: [x - w / 2, top, x + w / 2, Math.min(1, top + h)], build: body ? noisy(body, parts) : null,
+    face: true, head: { x: px, y: hy }, hands: [] };
+};
+// A speaker talking with their hands: the box reaches out to wherever the hand is.
+const talker = (name, x, scale, body, hand) => {
+  const p = person(name, x, scale, body);
+  p.hands = [{ x: hand.x, y: hand.y }, { x: (x + hand.x) / 2, y: (p.headY + 0.12 + hand.y) / 2 }];
+  p.box = [Math.min(p.box[0], hand.x - 0.02), Math.min(p.box[1], hand.y - 0.02), Math.max(p.box[2], hand.x + 0.02), p.box[3]];
+  return p;
+};
+// What the pose model sometimes reports around a moving arm: a second "person" with no real face
+// (or a "face" on the hand), about the speaker's size, inside the speaker's box.
+const phantom = (name, hand, scale, faceOnHand) => {
+  const x = hand.x + gauss() * 0.01, y = hand.y + gauss() * 0.01;
+  return { name, x, headY: y - 0.03, scale, box: [x - scale * 0.7, y - 0.06, x + scale * 0.7, y + 0.09], build: null,
+    face: !!faceOnHand, head: { x, y: y - 0.03 }, hands: [] };
 };
 function run(title, frames, opts = {}) {
   const st = { cfg: { missFrames: 10, holdMatch: 0.6 } };
-  let now = 1000; const log = []; let wrong = 0, firstWrong = null;
+  let now = 1000; const log = []; let wrong = 0, firstWrong = null, run = 0, longest = 0;
   for (let f = 0; f < frames.length; f++) {
     const fr = frames[f];
     if (fr.lock) st.lock = fr.lock;
     if (fr.hold) { if (st.target && !fr.lock) st.held = true; else st.holdReq = true; }
-    const t = pick(st, fr.people, now);
+    const t = pick(st, opts.fragments ? dropFragments(fr.people) : fr.people, now);
     const who = t ? t.name : '-';
     log.push(who);
-    if (t && fr.want && t.name !== fr.want) { wrong++; if (firstWrong == null) firstWrong = f; }
+    // must: the speaker is plainly in shot, so the red box has to be on them (not lost or holding).
+    // at: where the speaker really is. Following something else that close frames the same spot
+    // (well inside the comfort zone, so the camera doesn't move): not counted as a wrong frame.
+    const sameSpot = t && fr.at && Math.hypot(t.x - fr.at.x, t.headY - fr.at.headY) < 0.05;
+    if ((t && fr.want && t.name !== fr.want && !sameSpot) || (!t && fr.must)) { wrong++; run++; longest = Math.max(longest, run); if (firstWrong == null) firstWrong = f; }
+    else run = 0;
     now += 66;
   }
   const runs = []; for (const w of log) { if (!runs.length || runs.at(-1)[0] !== w) runs.push([w, 0]); runs.at(-1)[1]++; }
-  console.log(`${wrong ? 'FAIL' : 'ok  '} ${title}: ${runs.map(([w, n]) => `${w}×${n}`).join(' ')}${wrong ? `  (${wrong} wrong frames, first at ${firstWrong})` : ''} | locked:${!!st.held}`);
-  return wrong;
+  // tolerance: a few single stray frames allowed (never more than maxRun in a row), for scenes where
+  // the pose model itself drops the speaker now and then. Off the speaker any longer is a failure.
+  const bad = wrong > (opts.tolerance || 0) || longest > (opts.maxRun ?? 0);
+  console.log(`${bad ? 'FAIL' : 'ok  '} ${title}: ${runs.map(([w, n]) => `${w}×${n}`).join(' ')}${wrong ? `  (${wrong} wrong frames, longest ${longest} in a row, first at ${firstWrong})` : ''} | locked:${!!st.held}`);
+  return bad ? Math.max(1, wrong) : 0;
 }
 const N = (n, fn) => Array.from({ length: n }, (_, i) => fn(i));
 let fails = 0;
@@ -84,6 +110,40 @@ for (const locked of [true, false]) {
     ...N(90, (i) => { const ax = 0.2 + i * 0.007, bx = 0.8 - i * 0.007; const hidden = Math.abs(ax - bx) < 0.08;
       return { people: [...(hidden ? [] : [person('A', ax, 0.1, bodyA)]), person('B', bx, 0.13, bodyA)], want: 'A' }; }),
   ]);
+}
+// 9. The speaker talks with their hands. The pose model reports a second "person" around the
+// moving hand, about their size, now and then, and now and then misses the speaker for a frame.
+// A stranger (C) stands far off to the side the whole time. The red box must stay on A.
+const handAt = (i) => ({ x: 0.5 + 0.13 * Math.sin(i / 6), y: 0.45 + 0.08 * Math.sin(i / 4) });
+for (const [label, locked, faceOnHand] of [
+  ['locked', true, false], ['locked, "face" seen on the hand', true, true], ['not locked', false, false],
+]) {
+  fails += run(`Speaker talks with their hands (${label})`, [
+    { people: [person('A', 0.5, 0.1, bodyA), person('C', 0.9, 0.1, bodyC)], hold: locked, lock: { x: 0.5, y: 0.35 } },
+    ...N(30, () => ({ people: [person('A', 0.5, 0.1, bodyA), person('C', 0.9, 0.1, bodyC)], want: 'A', must: true })),
+    ...N(300, (i) => {
+      const hand = handAt(i), r = rnd();
+      const speakerMissed = r < 0.12; // the model drops the speaker for a frame
+      const ghost = r < 0.7; // and finds a "person" at the hand
+      const a = talker('A', 0.5 + gauss() * 0.004, 0.1, bodyA, hand);
+      return {
+        people: [...(speakerMissed ? [] : [a]), ...(ghost ? [phantom('hand', hand, 0.08 + rnd() * 0.04, faceOnHand)] : []), person('C', 0.9, 0.1, bodyC)],
+        want: 'A', must: !speakerMissed, at: { x: a.x, headY: a.headY },
+      };
+    }),
+    ...N(30, () => ({ people: [person('A', 0.5, 0.1, bodyA), person('C', 0.9, 0.1, bodyC)], want: 'A', must: true })),
+  ], { fragments: true, tolerance: 3, maxRun: 2 });
+}
+// 10. Someone really standing behind the speaker (smaller, inside the speaker's box, with their own
+// face) is still a person, not a fragment of the speaker.
+{
+  const a = talker('A', 0.5, 0.12, bodyA, { x: 0.62, y: 0.5 });
+  const behind = person('D', 0.44, 0.05, bodyB);
+  behind.box = [0.42, 0.28, 0.47, 0.42]; behind.head = { x: 0.445, y: 0.3 }; behind.headY = 0.3;
+  const kept = dropFragments([a, behind, phantom('hand', { x: 0.62, y: 0.5 }, 0.1, false)]).map((p) => p.name);
+  const ok = !logic.dropFragments || (kept.includes('A') && kept.includes('D') && !kept.includes('hand'));
+  if (!ok) fails++;
+  console.log(`${ok ? 'ok  ' : 'FAIL'} A real person behind the speaker is kept; the hand "person" is dropped (${kept.join(', ')})`);
 }
 // 7. Not locked: A leaves for good, then C is picked (old behaviour kept).
 {

@@ -1,7 +1,7 @@
 // Runs in PTZ Pad's hidden tracker window: finds people in each frame with
 // MediaPipe Pose (on-device) and reports who to follow.
 import { FilesetResolver, PoseLandmarker } from '../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs';
-import { summarize, pick, frameShift } from './logic.js';
+import { summarize, pick, frameShift, dropFragments } from './logic.js';
 
 const api = window.ptzTracker;
 const work = document.createElement('canvas');
@@ -46,7 +46,8 @@ api.onFrame(async ({ id, w, h, data }) => {
     const now0 = performance.now();
     const res = cam.pose.detectForVideo(work, cam.ts);
     const world = res.worldLandmarks || [];
-    const people = (res.landmarks || []).map((lm, i) => summarize(lm, w / h, world[i])).filter(Boolean);
+    // A "person" the model finds on someone's moving arm or hand is part of them, not someone else.
+    const people = dropFragments((res.landmarks || []).map((lm, i) => summarize(lm, w / h, world[i])).filter(Boolean));
     const t = pick(cam.state, people, now0);
     const out = {
       id, found: !!t, w, h,
