@@ -55,6 +55,7 @@ api.onFrame(async ({ id, w, h, data }) => {
       people: people.map((p) => p.box),
       lost: !t && !!cam.state.target, // still waiting for the same person to come back
       misses: cam.state.misses || 0,
+      why: cam.state.misses ? cam.state.why || '' : '', // why the speaker wasn't picked (see logic.js)
       locked: !!cam.state.held, lockPending: !!cam.state.holdReq,
       crossing: !!cam.state.crossing, // holding still while someone crosses in front of them
       learned: cam.state.model ? cam.state.model.n : 0, // how many clear looks at their build so far

@@ -159,6 +159,13 @@ p{margin:0}
 #lockBtn.on{background:var(--tally);border-color:var(--tally);color:#fff}
 .aimrow{margin-top:4px;display:grid;grid-template-columns:3.2em 1fr 3.2em;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
 .aimrow span:last-child{text-align:right}
+.shotbtns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:2px 0 6px}
+.shotbtns button{border:1px solid var(--line);background:var(--raise);border-radius:7px;padding:5px 0;cursor:pointer;font:600 14px/1.1 var(--cond)}
+.shotbtns button:hover{border-color:var(--muted)}
+.shotbtns button[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.shotbtns button.custom::after{content:" \2022";color:var(--amber)}
+.shotbtns button[aria-pressed="true"].custom::after{color:var(--amber)}
+#shotNote{margin:4px 0 0}
 .linkbtn{background:none;border:0;padding:2px 4px;color:var(--amber);cursor:pointer;font-size:12.5px}
 .linkbtn:disabled{color:var(--dim);cursor:default}
 .cam .trk{color:var(--tally);font-weight:600}
@@ -514,6 +521,13 @@ h2{font-size:16px;margin:0}
         <div class="lockinfo"><b id="lockState">Not locked</b><span id="lockColor"></span></div>
         <button class="btn" type="button" id="lockBtn" title="Lock on the speaker in the red box (L on the keyboard). On the controller, A locks as it starts tracking.">Lock</button>
       </div>
+      <div class="tune" id="shotTune">
+        <div class="tune-head"><span>Shot</span><output id="oShot" class="small">Built-in size</output></div>
+        <div class="shotbtns" role="group" aria-label="Shot for auto-tracking" id="shotBtns"></div>
+        <div class="aimrow"><span>Wider</span><input type="range" id="shotSize" min="-1" max="1" step="0.05" aria-label="Zoom for this shot, wider to tighter"><span>Tighter</span></div>
+        <div class="tune-ends"><button type="button" class="linkbtn" id="shotGrab" title="Zoom the camera by hand until this shot looks right, then click">Use current zoom</button><button type="button" class="linkbtn" id="shotReset">Built-in size</button></div>
+        <p class="hint" id="shotNote" hidden></p>
+      </div>
       <div class="tune">
         <div class="tune-head"><span>Comfort zone position</span><output id="oAim" class="small">Centered</output></div>
         <div class="aimrow"><span>Left</span><input type="range" id="aimX" min="-0.35" max="0.35" step="0.01" aria-label="Comfort zone, left to right"><span>Right</span></div>
@@ -738,6 +752,7 @@ h2{font-size:16px;margin:0}
       <label class="f"><span>Precision mode while tracking</span><select id="tPrec"><option value="rb">Slows tracking while RB is held</option><option value="always">Always track at precision speed</option><option value="off">Doesn’t affect tracking</option></select></label>
       <div class="set-row"><span>Detections in a row without the speaker before choosing someone else (not while locked)</span><output id="oMiss"></output><input type="range" id="tMiss" min="3" max="60" step="1"></div>
       <div class="set-row"><span>Lock body match: how closely someone must match the locked person’s build to be picked back up after they’re lost (higher is stricter)</span><output id="oHold"></output><input type="range" id="tHold" min="0.4" max="0.9" step="0.05"></div>
+      <label class="f"><span>When the speaker walks out of the shot</span><select id="tSearch"><option value="zoom">Zoom out to find them, then pan their way</option><option value="pan">Pan the way they went</option><option value="off">Stay where it is</option></select></label>
       <label class="f"><span>When the speaker is lost</span><select id="tLost"><option value="hold">Stay where it is</option><option value="preset">Go to a preset</option></select></label>
       <div class="half" id="tLostBox">
         <label class="f"><span>Preset</span><select id="tLostPreset"></select></label>
@@ -810,7 +825,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.15.0'; // keep in step with package.json "version"
+const APP_VERSION = '1.16.0'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -985,7 +1000,7 @@ const DRIVERS = { usb: USBD, mevo: NONE, video: NONE, 'visca-sony': VISCA, 'visc
 /* ================= state ================= */
 const DEFAULT_SETTINGS = { deadzone: 0.12, triggerDz: 0.08,
   tc: { on: false, ip: '', user: '', pass: '', follow: 'preview', protectDir: 'normal', protectOp: 'slow', mode: 'take', confirm: false, pick: true },
-  track: { v: 2, framing: 'medium', autoZoom: true, speed: 0.3, smooth: 0.6, zone: 0.1, lost: 'hold', lostPreset: 1, lostAfter: 5, tune: 0, precision: 'rb', missFrames: 10, holdMatch: 0.6,
+  track: { v: 2, framing: 'medium', shots: {}, autoZoom: true, speed: 0.3, smooth: 0.6, zone: 0.1, lost: 'hold', search: 'zoom', lostPreset: 1, lostAfter: 5, tune: 0, precision: 'rb', missFrames: 10, holdMatch: 0.6,
     pid: { manual: false, kp: 1.1, ki: 0, kd: 0.33, settle: 0.5, brake: 3, maxPan: 0.19, maxTilt: 0.15, accel: 0.36, delay: 300, easeIn: 1.2, easeOut: 1 } }, expo: 1.7, precision: 0.3, maxSpeed: 0.7, invertTilt: false, invertFocus: false, rumble: true, bridge: 'http://localhost:8787' };
 const state = { cams: [], activeId: null, settings: { ...DEFAULT_SETTINGS } };
 const STORE_KEY = 'ptzpad.v1';
@@ -2109,6 +2124,55 @@ const FRAMING = {
   medium: { headY: 0.30, scale: 0.15, label: 'Medium (waist up)' },
   close:  { headY: 0.36, scale: 0.28, label: 'Close (head and shoulders)' },
 };
+const LOCK_WHY = {
+  unseen: 'The pose model didn\u2019t find them near where they were (left the shot, hidden, or moved fast).',
+  behind: 'Someone is in front of them.',
+  claimed: 'Someone else in the shot was the closer match where they stood.',
+  build: 'Their build didn\u2019t match what PTZ Pad learned. If this keeps happening, lower Lock body match.',
+  unsure: 'They weren\u2019t clearly found this time.',
+};
+// How big the speaker should be for each shot: your own size (set with the Shot slider or
+// Use current zoom) or the built-in one. Sizes are in shoulder widths per frame width.
+// Looking for a speaker who walked out of the shot: how fast and how long to zoom out first.
+const SEARCH_ZOOM = 0.35, SEARCH_ZOOM_MS = 2500;
+const SHOT_RANGE = 1; // the slider reaches half and double the built-in size
+const shotKey = () => (FRAMING[state.settings.track.framing] ? state.settings.track.framing : 'medium');
+function shotScale(key = shotKey()) {
+  const v = state.settings.track.shots && state.settings.track.shots[key];
+  return v > 0 ? v : FRAMING[key].scale;
+}
+function setShotScale(key, v) {
+  const T = state.settings.track, base = FRAMING[key].scale;
+  T.shots = { ...(T.shots || {}) };
+  if (v == null) delete T.shots[key];
+  else T.shots[key] = clamp(v, base * 2 ** -SHOT_RANGE, base * 2 ** SHOT_RANGE);
+  for (const tr of trackers.values()) { tr.reframeAt = performance.now(); tr.zoomWant = 0; } // zoom to it now, not only once it's far off
+  persist(); renderShot();
+}
+function setShot(key) {
+  if (!FRAMING[key]) return;
+  state.settings.track.framing = key;
+  $('tFraming').value = key;
+  for (const tr of trackers.values()) { tr.reframeAt = performance.now(); tr.zoomWant = 0; tr.dirty = true; }
+  persist(); renderShot();
+}
+function renderShot() {
+  const key = shotKey(), T = state.settings.track, base = FRAMING[key].scale;
+  for (const b of $('shotBtns').children) {
+    b.setAttribute('aria-pressed', String(b.dataset.shot === key));
+    b.classList.toggle('custom', !!(T.shots && T.shots[b.dataset.shot] > 0));
+  }
+  const lv = Math.log2(shotScale(key) / base), n = Math.round((2 ** lv - 1) * 100);
+  if (document.activeElement !== $('shotSize')) $('shotSize').value = lv;
+  $('oShot').textContent = Math.abs(n) < 2 ? 'Built-in size' : n > 0 ? `${n}% tighter` : `${Math.round((1 - 2 ** lv) * 100)}% wider`;
+  $('shotReset').disabled = !(T.shots && T.shots[key] > 0);
+  const c = activeCam(), tr = c && trackers.get(c.id);
+  const can = !!(tr && tr.det && tr.det.found && tr.fs > 0.005);
+  $('shotGrab').disabled = !can;
+  $('shotGrab').title = can ? 'Make this the size for this shot: the speaker as big as they are now' : 'Start auto-tracking and find the speaker first, then zoom by hand and click';
+  const note = !T.autoZoom ? 'Zoom to keep the shot size is off in Settings, so tracking won\u2019t zoom to these sizes.' : '';
+  $('shotNote').textContent = note; $('shotNote').hidden = !note;
+}
 const trackers = new Map(); // camera id -> tracking state
 const fading = new Map();   // camera id -> tracking state easing to a stop after tracking was turned off
 const newTracker = () => ({ status: 'starting', pv: 0, walking: false, walkFlip: 0, camAcc: 0, path: [],
@@ -2185,6 +2249,7 @@ function trackStep(cam, tr, now, lim = 1) {
   let tp = 0, tt = 0, tz = 0;
   if (d && d.found && now - d.at < 700) {
     if (tr.lostSince) tr.fresh = true; // just found again: start the smoothing from here
+    if (tr.searching) { tr.searching = ''; tr.reframeAt = now; tr.zoomWant = 0; } // zoomed out to find them: back to the shot's size
     tr.lostSince = 0; tr.lostDone = false;
     const lead = 0; // the comfort zone stays where you put it (right stick or sliders); it never shifts on its own
     // The picture is old by the stream's delay, and the camera has kept moving
@@ -2269,13 +2334,20 @@ function trackStep(cam, tr, now, lim = 1) {
     // Zoom like an operator would: only once the speaker has settled and the camera is still,
     // only when the shot is clearly off, and always at the slowest zoom speed.
     if (T.autoZoom && tr.fs > 0.005) {
-      const r = Math.log(F.scale / tr.fs); // above 0: speaker too small, zoom in
+      const r = Math.log(shotScale(FRAMING[T.framing] ? T.framing : 'medium') / tr.fs); // above 0: speaker too small, zoom in
       const calm = !walking && !tr.mx && tr.cmd.pan === 0 && now - tr.panIdleSince > 1000;
+      // Just after you change the shot or its size, zoom to it even for a small change, without the long wait.
+      const fresh = tr.reframeAt && now - tr.reframeAt < 8000;
       if (!tr.mz) {
-        if (calm && Math.abs(r) > 0.3) { tr.zoomWant = tr.zoomWant || now; if (now - tr.zoomWant > 2000) tr.mz = true; }
+        if (calm && Math.abs(r) > (fresh ? 0.08 : 0.3)) { tr.zoomWant = tr.zoomWant || now; if (now - tr.zoomWant > (fresh ? 400 : 2000)) tr.mz = true; }
         else tr.zoomWant = 0;
-      } else if (Math.abs(r) < 0.08 || walking || tr.mx) { tr.mz = false; tr.zoomWant = 0; }
+      } else if (Math.abs(r) < 0.05 || walking || tr.mx) { tr.mz = false; tr.zoomWant = 0; if (Math.abs(r) < 0.05) tr.reframeAt = 0; }
       if (tr.mz) tz = Math.sign(r) * (0.06 + T.speed * 0.1);
+    }
+    // Walking out faster than the pan keeps up (nearly at the edge, still heading out): zoom out a
+    // little to keep them in the shot. Once they stop, the shot zooms back to its size.
+    if ((T.search || 'zoom') === 'zoom' && walking && tr.pv && Math.sign(tr.pv) === Math.sign(tr.fx - 0.5) && Math.abs(tr.fx - 0.5) > 0.38) {
+      tz = -SEARCH_ZOOM * 0.6; tr.reframeAt = now; tr.zoomWant = 0;
     }
   } else {
     tr.mx = tr.my = tr.mz = false;
@@ -2283,9 +2355,19 @@ function trackStep(cam, tr, now, lim = 1) {
     if (tr.viz) tr.viz = { ...tr.viz, px: null, py: null, mx: false, my: false };
     if (tr.status === 'running') {
       if (!tr.lostSince) tr.lostSince = now;
-      // Speaker just left the frame at an edge: look gently that way for a few seconds.
+      // The speaker walked out of the shot. Zooming out is smoother than a fast pan, so first zoom
+      // out to find them; if they still aren't in the wider shot, pan gently the way they went.
+      // Someone hidden mid-shot (behind another person) isn't searched for: they're still there.
       const ls = tr.lastSeen, since = now - Math.max(tr.lostSince, tr.searchFrom);
-      if (ls && since < 5000 && !tr.overridden && (ls.x < 0.15 || ls.x > 0.85)) tp = ls.x < 0.5 ? -0.15 : 0.15;
+      const side = !ls ? 0 : ls.x < 0.2 ? -1 : ls.x > 0.8 ? 1
+        : Math.abs(tr.pv) > 0.05 && Math.abs(ls.x - 0.5) > 0.2 && Math.sign(tr.pv) === Math.sign(ls.x - 0.5) ? Math.sign(tr.pv) : 0;
+      const how = T.search || 'zoom';
+      if (side && how !== 'off' && !tr.overridden && !(tr.det && tr.det.crossing)) {
+        const wait = 250; // a missed detection or two isn't a walk-out
+        const zoomFor = how === 'zoom' ? SEARCH_ZOOM_MS : 0;
+        if (since > wait && since < wait + zoomFor) { tz = -SEARCH_ZOOM; tr.searching = 'zoom'; }
+        else if (since >= wait + zoomFor && since < wait + zoomFor + 5000) { tp = side * 0.15; tr.searching = 'pan'; }
+      }
       if (!tr.fading && T.lost === 'preset' && !tr.lostDone && now - tr.lostSince > T.lostAfter * 1000) {
         tr.lostDone = true;
         presetFor(cam, Number(T.lostPreset) || 1, false, false);
@@ -2570,6 +2652,17 @@ if (canTrack()) NATIVE.track.onUpdate((r) => {
     if (tr.lastX != null && now > tr.lastAt) tr.vx = clamp(tr.vx * 0.8 + ((r.x - tr.lastX) / ((now - tr.lastAt) / 1000)) * 0.2, -1, 1);
     tr.lastX = r.x; tr.lastAt = now;
   }
+  // A lock that has been waiting half a second or more: say why in the command log, once,
+  // and say when the speaker is picked back up, so lock breaks can be traced after a show.
+  if (r.locked && !r.found && (r.misses || 0) >= 5 && !tr.lossAt) {
+    tr.lossAt = now;
+    const cam = state.cams.find((c) => c.id === r.id);
+    log(`${cam ? cam.name : 'Camera'}: lock waiting for the speaker. ${LOCK_WHY[r.why] || LOCK_WHY.unsure}`);
+  } else if (r.found && tr.lossAt) {
+    const cam = state.cams.find((c) => c.id === r.id);
+    log(`${cam ? cam.name : 'Camera'}: lock back on the speaker after ${((now - tr.lossAt) / 1000).toFixed(1)} s.`, 'ok');
+    tr.lossAt = 0;
+  }
   tr.det = { ...r, at: now };
   if (r.preview) tr.preview = r.preview;
   tr.dirty = true;
@@ -2658,7 +2751,7 @@ function drawPad(gp) {
 }
 
 function renderTracking() {
-  renderAim();
+  renderAim(); renderShot();
   const c = activeCam();
   const tr = c && trackers.get(c.id);
   const tk = tr && !tr.viewOnly && !tr.staged;
@@ -3361,7 +3454,7 @@ function sendTrackCfg(id) {
    Preview -> A: go live. Locks on the speaker in the red box and the camera starts following.
    Live -> A: back to the preview. The camera stops and the lock is released.
    Right stick click turns auto-tracking off from either step. */
-const TRACK_MOTION = ['cmd', 'q', 'movedAt', 'lastDir', 'zeroSince', 'fx', 'fy', 'fs', 'fresh', 'panIdleSince', 'zoomWant', 'lastStepAt', 'steady', 'hist', 'out', 'mx', 'my', 'mz', 'lostSince', 'lostDone', 'overridden', 'searchFrom'];
+const TRACK_MOTION = ['cmd', 'q', 'movedAt', 'lastDir', 'zeroSince', 'fx', 'fy', 'fs', 'fresh', 'panIdleSince', 'zoomWant', 'lastStepAt', 'steady', 'hist', 'out', 'mx', 'my', 'mz', 'lostSince', 'lostDone', 'overridden', 'searchFrom', 'searching', 'reframeAt'];
 function resetTrackMotion(tr) { // start moving from rest; what it has learned about the camera stays
   const f = newTracker();
   for (const k of TRACK_MOTION) tr[k] = f[k];
@@ -3578,8 +3671,23 @@ for (const [id, key] of [['sInvTilt', 'invertTilt'], ['sInvFocus', 'invertFocus'
   const T = state.settings.track, save = () => persist();
   for (const [k, f] of Object.entries(FRAMING)) { const o = document.createElement('option'); o.value = k; o.textContent = f.label; $('tFraming').append(o); }
   for (let n = 1; n <= 8; n++) { const o = document.createElement('option'); o.value = n; o.textContent = n; $('tLostPreset').append(o); }
-  $('tFraming').value = T.framing; $('tFraming').onchange = () => { T.framing = $('tFraming').value; save(); };
-  $('tZoom').checked = T.autoZoom; $('tZoom').onchange = () => { T.autoZoom = $('tZoom').checked; save(); };
+  $('tFraming').value = T.framing; $('tFraming').onchange = () => setShot($('tFraming').value);
+  $('tZoom').checked = T.autoZoom; $('tZoom').onchange = () => { T.autoZoom = $('tZoom').checked; save(); renderShot(); };
+  for (const [k, f] of Object.entries(FRAMING)) {
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.shot = k; b.textContent = f.label.replace(/\s*\(.*\)$/, '');
+    b.title = f.label; b.onclick = () => setShot(k); $('shotBtns').append(b);
+  }
+  $('shotSize').oninput = () => setShotScale(shotKey(), FRAMING[shotKey()].scale * 2 ** Number($('shotSize').value));
+  $('shotReset').onclick = () => setShotScale(shotKey(), null);
+  $('shotGrab').onclick = () => {
+    const c = activeCam(), tr = c && trackers.get(c.id);
+    if (!tr || !(tr.fs > 0.005)) return;
+    const key = shotKey(), base = FRAMING[key].scale, want = tr.fs;
+    setShotScale(key, want);
+    const lim = want > base * 2 ** SHOT_RANGE ? 'tightest' : want < base * 2 ** -SHOT_RANGE ? 'widest' : '';
+    log(`${FRAMING[key].label.replace(/\s*\(.*\)$/, '')} shot now keeps the speaker at this size${lim ? ` (as close as it goes: the ${lim} this shot allows; try another shot)` : ''}.`, 'ok');
+  };
+  renderShot();
   const pctOut = (id, out, key) => { $(id).value = T[key]; $(out).textContent = pct(T[key]) + '%'; $(id).oninput = () => { T[key] = Number($(id).value); $(out).textContent = pct(T[key]) + '%'; save(); }; };
   pctOut('tSpeed', 'oTSpeed', 'speed'); pctOut('tZone', 'oTZone', 'zone'); pctOut('tSmooth', 'oTSmooth', 'smooth');
   for (const id of ['tSpeed', 'tZone', 'tSmooth']) $(id).addEventListener('input', () => renderTune());
@@ -3587,6 +3695,7 @@ for (const [id, key] of [['sInvTilt', 'invertTilt'], ['sInvFocus', 'invertFocus'
   $('tTune').oninput = () => setTune($('tTune').value);
   $('tuneReset').onclick = () => setTune(0);
   const lostVis = () => { $('tLostBox').hidden = T.lost !== 'preset'; };
+  $('tSearch').value = T.search || 'zoom'; $('tSearch').onchange = () => { T.search = $('tSearch').value; save(); };
   $('tLost').value = T.lost; $('tLost').onchange = () => { T.lost = $('tLost').value; lostVis(); save(); }; lostVis();
   $('tLostPreset').value = T.lostPreset; $('tLostPreset').onchange = () => { T.lostPreset = Number($('tLostPreset').value); save(); };
   $('tLostAfter').value = T.lostAfter; $('tLostAfter').onchange = () => { T.lostAfter = clamp(Number($('tLostAfter').value) || 5, 1, 60); $('tLostAfter').value = T.lostAfter; save(); };

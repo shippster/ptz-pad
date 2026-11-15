@@ -65,7 +65,9 @@ export function isFragment(d, p) {
   if (inside(d.box, p.box) < 0.6) return false;
   const h = d.head || { x: d.x, y: d.headY };
   if (!d.face) return true; // nothing of its own: an arm or hand
-  if (near(h, p.head || { x: p.x, y: p.headY }, 0.025)) return true; // the same face, counted twice
+  // The same face counted twice: a real second face is at least a head's width away (a head is
+  // about half a shoulder width across), so anything closer is the same person.
+  if (near(h, p.head || { x: p.x, y: p.headY }, Math.max(0.025, 0.55 * (p.scale || 0)))) return true;
   return (p.hands || []).some((q) => near(h, q, 0.07)); // a "face" on their hand or arm
 }
 /* The model can also miss the speaker for a frame and report only the "person" on their hand.
@@ -218,7 +220,12 @@ function updateOthers(state, people, chosen, now) {
     if (usedP.has(p) || (chosen && overlap(p.box, chosen.box) > 0.5)) continue; // a double of the speaker
     const o = { at: now }; moveTrack(o, p, now); o.vx = 0; others.push(o); usedO.add(o);
   }
-  if (chosen) for (const o of usedO) o.together = true; // seen alongside the speaker
+  if (chosen) for (const o of usedO) {
+    o.together = true; // seen alongside the speaker
+    // Seen clearly beside the speaker, not just sitting on top of them (a copy of the speaker the
+    // pose model reported twice sits on them). Only someone seen apart can stand in for them.
+    if (!(o.box && chosen.box && (inside(o.box, chosen.box) > 0.6 || inside(chosen.box, o.box) > 0.6))) o.apart = (o.apart || 0) + 1;
+  }
   state.others = others.filter((o) => o.misses <= 20);
 }
 
@@ -257,7 +264,7 @@ export function pick(state, people, now = performance.now()) {
     if (hit) {
       if (state.held) state.holdReq = true;
       // The person who was followed becomes one of the others.
-      if (state.target) (state.others = state.others || []).push({ ...state.target, misses: 0, together: true });
+      if (state.target) (state.others = state.others || []).push({ ...state.target, misses: 0, together: true, apart: 99 });
       state.others = (state.others || []).filter((o) => !(o.box && overlap(o.box, hit.box) > 0.5));
       state.held = false; state.target = null; state.model = null; state.anchor = null;
       return done(follow(state, hit, now, true));
@@ -275,7 +282,7 @@ export function pick(state, people, now = performance.now()) {
     // slowly), or anywhere once they've been gone a while and their build clearly matches.
     const heldReach = 0.1 + Math.min(0.2, misses * 0.01);
     const learned = state.model && state.model.n >= 20;
-    const others = (state.others || []).filter((o) => o.together);
+    const others = (state.others || []).filter((o) => o.together && (o.apart || 0) >= 3);
     const near = people.filter((p) => dist(p, pred) < reach || (predBox && overlap(p.box, predBox) > 0.05));
     const crowded = near.length > 1 || others.some((o) => o.misses === 0 && dist(o, pred) < 0.15);
     let best = null, bc = Infinity, second = Infinity;
@@ -295,7 +302,9 @@ export function pick(state, people, now = performance.now()) {
       if (misses <= 2) {
         // Still in sight: the same body moving smoothly. Build only rules out a clear mismatch
         // (someone half hidden measures badly).
-        ok = !claimed && d < reach && size < 0.7 && (like == null || like >= (held ? holdMin * 0.5 : 0.25));
+        // With nobody else close by, the same body moving smoothly is them however their build
+        // measures (turning side-on reads very differently): build only decides in a crowd.
+        ok = !claimed && d < reach && size < 0.7 && (like == null || !crowded || like >= (held ? holdMin * 0.5 : 0.25));
       } else if (held) {
         ok = !claimed && ((d < heldReach && (like == null || like >= holdMin)) || (misses >= missMax && strong));
       } else {
@@ -313,11 +322,19 @@ export function pick(state, people, now = performance.now()) {
         return null;
       }
       // Build is only learned from a clear frame, with nobody else close by.
-      return done(follow(state, best, now, !crowded && second - bc > 0.4));
+      const fits = (() => { const m = buildMatch(state.model, best.build); return !m || !state.model || state.model.n < 20 || m.score >= 0.5; })();
+      return done(follow(state, best, now, !crowded && second - bc > 0.4 && fits));
     }
     state.misses = misses + 1;
     const behind = others.some((o) => o.misses === 0 && dist(o, pred) < 0.2); // hidden behind someone
     if (behind) state.crossing = true;
+    // Why they weren't picked this time, for the command log when a lock starts waiting.
+    const cand = people.map((p) => ({ p, d: dist(p, pred) })).sort((a, b) => a.d - b.d)[0];
+    const m = cand && buildMatch(state.model, cand.p.build);
+    state.why = behind ? 'behind'
+      : !cand || cand.d >= Math.max(reach, held ? heldReach : 0) ? 'unseen'
+      : others.some((o) => trackCost(o, cand.p, now) < cand.d / 0.1 + sizeGap(t, cand.p) * 0.8 + 0.3) ? 'claimed'
+      : m && m.score < holdMin ? 'build' : 'unsure';
     // Only choose someone else after missFrames detections in a row without the speaker (three
     // times as long while they're hidden behind someone), and never while locked.
     if (!held && state.misses >= missMax * (behind ? 3 : 1)) { state.target = null; state.model = null; state.anchor = null; }

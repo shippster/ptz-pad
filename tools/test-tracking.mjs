@@ -139,12 +139,49 @@ for (const [label, locked, faceOnHand] of [
 {
   const a = talker('A', 0.5, 0.12, bodyA, { x: 0.62, y: 0.5 });
   const behind = person('D', 0.44, 0.05, bodyB);
-  behind.box = [0.42, 0.28, 0.47, 0.42]; behind.head = { x: 0.445, y: 0.3 }; behind.headY = 0.3;
+  // Their face a head's width and a bit from the speaker's (closer, and the heads would overlap).
+  behind.box = [0.385, 0.28, 0.435, 0.42]; behind.head = { x: 0.41, y: 0.3 }; behind.headY = 0.3; behind.x = 0.41;
   const kept = dropFragments([a, behind, phantom('hand', { x: 0.62, y: 0.5 }, 0.1, false)]).map((p) => p.name);
   const ok = !logic.dropFragments || (kept.includes('A') && kept.includes('D') && !kept.includes('hand'));
   if (!ok) fails++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} A real person behind the speaker is kept; the hand "person" is dropped (${kept.join(', ')})`);
 }
+// 11. The pose model reports the speaker twice: a second, head-and-shoulders copy whose face
+// sits a little off the real one. It's the same person, never someone beside them.
+for (const locked of [true, false]) {
+  fails += run(`Speaker detected twice, copy slightly off (${locked ? 'locked' : 'not locked'})`, [
+    { people: [person('A', 0.5, 0.1, bodyA)], hold: locked, lock: { x: 0.5, y: 0.35 } },
+    ...N(30, () => ({ people: [person('A', 0.5, 0.1, bodyA)], want: 'A', must: true })),
+    ...N(300, (i) => {
+      const a = person('A', 0.5 + 0.08 * Math.sin(i / 30), 0.1, bodyA), r = rnd();
+      const off = (0.03 + rnd() * 0.02) * (rnd() < 0.5 ? -1 : 1);
+      const dup = { name: 'dup', x: a.x + off, headY: a.headY + 0.01, scale: 0.09, box: [a.box[0] + off, a.box[1], a.box[2] + off, a.box[1] + (a.box[3] - a.box[1]) * 0.55],
+        build: rnd() < 0.5 ? noisy(bodyA, UPPER) : null, face: true, head: { x: a.head.x + off, y: a.head.y + 0.01 }, hands: [] };
+      const missA = r < 0.1;
+      return { people: [...(missA ? [] : [a]), ...(r < 0.45 ? [dup] : [])], want: 'A', must: !missA, at: { x: a.x, headY: a.headY } };
+    }),
+    // When the model misses the speaker but reports the copy, following the copy for that frame is
+    // following the speaker's own face (at most a head's width off): allowed, a frame or two at a time.
+  ], { fragments: true, tolerance: 8, maxRun: 2 });
+}
+// 12. The speaker turns side-on for a while, alone: their build measures badly (shoulders look
+// narrow, so every proportion reads long), but it's plainly the same body moving smoothly.
+fails += run('Locked speaker turns side-on, alone', [
+  { people: [person('A', 0.5, 0.1, bodyA)], hold: true, lock: { x: 0.5, y: 0.35 } },
+  ...N(60, () => ({ people: [person('A', 0.5, 0.1, bodyA)], want: 'A', must: true })),
+  ...N(90, (i) => {
+    const skew = Object.fromEntries(Object.entries(bodyA).map(([k, v]) => [k, k === 'size' ? v - 0.35 : v + 0.3 + gauss() * 0.08]));
+    const a = person('A', 0.5 + i * 0.002, 0.07, skew); return { people: [a], want: 'A', must: true };
+  }),
+  ...N(40, () => ({ people: [person('A', 0.68, 0.1, bodyA)], want: 'A', must: true })),
+], { tolerance: 0 });
+// 13. Locked speaker walks briskly across the stage alone; the model misses them now and then.
+fails += run('Locked speaker walks briskly across, alone', [
+  { people: [person('A', 0.15, 0.1, bodyA)], hold: true, lock: { x: 0.15, y: 0.35 } },
+  ...N(30, () => ({ people: [person('A', 0.15, 0.1, bodyA)], want: 'A', must: true })),
+  ...N(55, (i) => { const miss = rnd() < 0.12; return { people: miss ? [] : [person('A', 0.15 + i * 0.013, 0.1, bodyA)], want: 'A', must: !miss }; }),
+  ...N(30, () => ({ people: [person('A', 0.86, 0.1, bodyA)], want: 'A', must: true })),
+], { tolerance: 2, maxRun: 2 });
 // 7. Not locked: A leaves for good, then C is picked (old behaviour kept).
 {
   const st = { cfg: { missFrames: 10, holdMatch: 0.6 } }; let now = 0, last;

@@ -3,6 +3,15 @@
 Each version's notes appear in the app's update notice and on the GitHub release.
 Write them for the people running the cameras: what changed and what they need to do.
 
+## 1.16.0 (2026-11-15)
+
+- **The lock holds much better.** Two common causes of lost locks are fixed:
+    - The pose model sometimes reports the speaker twice, as a second head-and-shoulders copy slightly off to one side. PTZ Pad took the copy for someone standing beside them and could then refuse the real speaker. It now knows the copy is the same person.
+    - When the speaker turned side-on, their body measurements changed and PTZ Pad let go of them, even alone on stage. Now, with nobody else close by, the same body moving smoothly stays locked however it measures.
+- **The log says why a lock waited.** If a lock waits for the speaker for half a second or more, the command log says why (left the shot, someone in front of them, someone else matched better, or their build didn't match) and how long it took to get them back. If breaks still happen, those lines tell us exactly what to fix.
+- **Set the zoom for each shot.** Auto-tracking now has Wide, Medium and Close buttons, with a Wider/Tighter slider for each shot. Or zoom the camera by hand until the shot looks right and click **Use current zoom**. A dot marks shots with your own size, and **Built-in size** puts a shot back. Changing a shot or its size zooms to it straight away.
+- **Walking out of the shot: zoom out first.** When the speaker walks out of the frame, PTZ Pad now zooms out smoothly to find them. If they still aren't in the wider shot, it pans the way they went. Once it finds them, it zooms back to the shot's size. If they're about to walk out faster than the camera can pan, it widens a little to keep them in. Change this under Feel and connection, Auto-tracking, **When the speaker walks out of the shot** (zoom out then pan, pan only, or stay).
+
 ## 1.15.0 (2026-11-15)
 
 - **Check for updates button.** Next to the version number at the top. Click it any time to see if a newer PTZ Pad is out. If there is, the update notice opens with what's new; if not, it tells you you're up to date. Nothing installs on its own, so it's safe to click during a show.
