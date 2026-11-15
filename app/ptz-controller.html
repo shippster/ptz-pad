@@ -81,6 +81,10 @@ p{margin:0}
 
 /* update notice */
 .chip.upd i{background:var(--amber)}
+.brand .updcheck{align-self:flex-end;margin-bottom:1px;font:500 13px/1 var(--font);padding:2px 4px}
+.brand .updmsg{align-self:flex-end;margin-bottom:2px;font:500 13px/1.2 var(--font);color:var(--muted);letter-spacing:0}
+.brand .updmsg.bad{color:var(--tally)}
+.brand .updmsg a{color:var(--amber)}
 .chip.upd button{font-size:13.5px}
 .update{background:var(--panel);border:1px solid var(--line-soft);border-left:4px solid var(--amber);border-radius:10px;padding:12px 14px;margin:0 0 14px}
 .update-head{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
@@ -398,6 +402,8 @@ h2{font-size:16px;margin:0}
     <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="9" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M21 14l7-4v12l-7-4z" fill="currentColor"/><circle cx="12" cy="16" r="2.6" fill="#ff4a3d"/></svg>
     <span>PTZ Pad</span>
     <span class="ver" id="appVersion"></span>
+    <button class="linkbtn updcheck" id="updCheck" type="button" title="See if a newer PTZ Pad is out">Check for updates</button>
+    <span class="updmsg" id="updMsg" aria-live="polite"></span>
   </div>
   <div class="status">
     <span class="chip" id="padChip"><i></i><span id="padText">No controller yet. Press any button on it.</span></span>
@@ -804,7 +810,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const MIN_MOVE = 1 / 24;
 const mapSpeed = (v, top) => (!v || top <= 0 ? 0 : Math.sign(v) * (Math.min(MIN_MOVE, top) + Math.max(0, top - MIN_MOVE) * Math.min(1, Math.abs(v))));
 const uid = () => Math.random().toString(36).slice(2, 9);
-const APP_VERSION = '1.14.1'; // keep in step with package.json "version"
+const APP_VERSION = '1.15.0'; // keep in step with package.json "version"
 document.getElementById('appVersion').textContent = 'v' + APP_VERSION;
 document.title = `PTZ Pad ${APP_VERSION}`;
 // Present when running inside the PTZ Pad desktop app (built-in bridge).
@@ -3856,7 +3862,9 @@ function showUpdate(mode) {
     $('updTitle').textContent = `PTZ Pad ${feed.version} is available`;
     $('updSub').textContent = UPDATE_BY_RELOAD
       ? `You have ${APP_VERSION}. Reload when you’re off air; your cameras and settings stay.`
-      : `You have ${APP_VERSION}. Download and install it when you’re off air; your cameras and settings stay.`;
+      : HOSTED
+        ? `This page is ${APP_VERSION}. Ask Claude to update this page, or download the desktop app.`
+        : `You have ${APP_VERSION}. Download and install it when you’re off air; your cameras and settings stay.`;
     $('updGo').textContent = UPDATE_BY_RELOAD ? 'Reload now' : 'Download';
     $('updGo').hidden = false;
     $('updNotes').innerHTML = notesBetween(feed, APP_VERSION, feed.version) || '<p>See the release page for details.</p>';
@@ -3888,14 +3896,49 @@ $('updLater').onclick = () => {
   }
 };
 $('updChipBtn').onclick = () => showUpdate('available');
-async function checkUpdates() {
-  let feed;
+// The update feed, or null when it can't be reached (offline, or blocked). The claude.ai page
+// can't fetch other sites itself, so it asks the PTZ Pad helper on this computer to fetch it.
+async function fetchFeed() {
+  const url = `${UPDATE_FEED}?t=${Date.now()}`;
   try {
-    const r = await timed(`${UPDATE_FEED}?t=${Date.now()}`, {}, 6000);
-    if (!r.ok) return;
-    feed = await r.json();
-  } catch (e) { return; } // offline or blocked: try again later
-  if (!feed || !feed.version) return;
+    const r = await timed(url, {}, 6000);
+    if (r.ok) { const f = await r.json(); if (f && f.version) return f; }
+  } catch (e) { /* blocked or offline: the helper may still reach it */ }
+  if (!HOSTED) return null;
+  const r = await helperCall({ type: 'http', url });
+  if (!r || !r.ok || !r.body) return null;
+  try { const f = JSON.parse(r.body); if (f && f.version) return f; } catch (e) { /* the helper may send only the start */ }
+  const v = /"version"\s*:\s*"(\d+\.\d+\.\d+)"/.exec(r.body);
+  return v ? { version: v[1], download: RELEASES_URL, releases: [] } : null;
+}
+let updMsgTimer = 0;
+function updMsg(text, bad, link) {
+  const el = $('updMsg');
+  clearTimeout(updMsgTimer);
+  el.className = 'updmsg' + (bad ? ' bad' : '');
+  el.textContent = text || '';
+  if (link) { const a = document.createElement('a'); a.href = RELEASES_URL; a.target = '_blank'; a.rel = 'noopener'; a.textContent = link; el.append(' ', a); }
+  if (text && !bad) updMsgTimer = setTimeout(() => { el.textContent = ''; }, 8000);
+}
+// Check for updates button: asks now, and always says what it found.
+async function checkUpdatesNow() {
+  const btn = $('updCheck');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Checking\u2026'; updMsg('');
+  try {
+    const feed = await fetchFeed();
+    if (!feed) { updMsg('Couldn\u2019t check. Is this computer online?', true, 'Releases page'); return; }
+    UPD.feed = feed;
+    if (cmpVer(feed.version, APP_VERSION) > 0) { updStore({ snoozed: null }); showUpdate('available'); return; }
+    $('updChip').hidden = true;
+    if (!$('updateBar').hidden && UPD.mode === 'available') $('updateBar').hidden = true;
+    updMsg(`You\u2019re up to date: ${APP_VERSION} is the latest.`);
+  } finally { btn.disabled = false; btn.textContent = 'Check for updates'; }
+}
+$('updCheck').onclick = checkUpdatesNow;
+async function checkUpdates() {
+  const feed = await fetchFeed();
+  if (!feed) return; // offline or blocked: try again later
   UPD.feed = feed;
   const st = updStore();
   if (st.seen && cmpVer(st.seen, APP_VERSION) < 0 && $('updateBar').hidden) { showUpdate('new'); return; }

@@ -3,6 +3,11 @@
 Each version's notes appear in the app's update notice and on the GitHub release.
 Write them for the people running the cameras: what changed and what they need to do.
 
+## 1.15.0 (2026-11-15)
+
+- **Check for updates button.** Next to the version number at the top. Click it any time to see if a newer PTZ Pad is out. If there is, the update notice opens with what's new; if not, it tells you you're up to date. Nothing installs on its own, so it's safe to click during a show.
+- **Works on the claude.ai page too.** There it checks through the PTZ Pad helper on your computer. If the page is behind, ask Claude to update it, or download the desktop app.
+
 ## 1.14.1 (2026-11-15)
 
 - **Talking with your hands no longer loses the speaker.** The pose model sometimes sees a second "person" around a speaker's moving arm or hand. PTZ Pad now recognizes it as part of the speaker, so the red box stays on them and the lock holds. The extra box around their hands is gone from the monitor too.
