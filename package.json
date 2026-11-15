@@ -63,13 +63,15 @@
           "_ndi._tcp"
         ],
         "NSCameraUsageDescription": "PTZ Pad shows the picture from USB, USB-C and built-in cameras and follows the speaker in it."
-      }
+      },
+      "artifactName": "PTZ-Pad-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
-      "category": "Video"
+      "category": "Video",
+      "artifactName": "PTZ-Pad-${version}.${ext}"
     },
     "asarUnpack": [
       "node_modules/koffi/**",
